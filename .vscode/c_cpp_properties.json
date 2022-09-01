@@ -1,0 +1,41 @@
+{
+    "configurations": [
+        {
+            "name": "Target 1",
+            "includePath": [
+                "g:\\STC_Workers\\Nondestructive discharge instrument\\Inc",
+                "g:\\STC_Workers\\Nondestructive discharge instrument\\SmallRTOS\\Inc",
+                "C:\\Keil_v5\\C51\\INC",
+                "g:\\STC_Workers\\Nondestructive discharge instrument",
+                "g:\\STC_Workers\\Nondestructive discharge instrument\\Src",
+                "g:\\STC_Workers\\Nondestructive discharge instrument\\SmallRTOS\\Src"
+            ],
+            "defines": [
+                "__C51__",
+                "__VSCODE_C51__",
+                "reentrant=",
+                "compact=",
+                "small=",
+                "large=",
+                "data=",
+                "idata=",
+                "pdata=",
+                "bdata=",
+                "xdata=",
+                "code=",
+                "bit=char",
+                "sbit=char",
+                "sfr=char",
+                "sfr16=int",
+                "sfr32=int",
+                "interrupt=",
+                "using=",
+                "_at_=",
+                "_priority_=",
+                "_task_="
+            ],
+            "intelliSenseMode": "${default}"
+        }
+    ],
+    "version": 4
+}

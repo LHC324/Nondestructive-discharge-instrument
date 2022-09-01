@@ -1,0 +1,760 @@
+C51 COMPILER V9.60.0.0   MODBUS                                                            08/03/2022 21:14:11 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE MODBUS
+OBJECT MODULE PLACED IN .\Objects\Modbus.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE Src\Modbus.c LARGE OPTIMIZE(9,SPEED) BROWSE INCDIR(.\Inc;.\SmallRTOS\Inc
+                    -) DEBUG OBJECTEXTEND PRINT(.\Listings\Modbus.lst) OBJECT(.\Objects\Modbus.obj)
+
+line level    source
+
+   1          /*
+   2           * ModbusSlave.c
+   3           *
+   4           *  Created on: 2022年04月08日
+   5           *      Author: LHC
+   6           */
+   7          
+   8          #include "Modbus.h"
+   9          #include "usart.h"
+  10          // #include "tool.h"
+  11          #include "discharger.h"
+  12          #include "Dwin.h"
+  13          
+  14          /*使用屏幕接收处理时*/
+  15          #define TYPEDEF_STRUCT uint8_t
+  16          /*定义Modbus对象*/
+  17          // pModbusHandle Modbus_Object;
+  18          extern uint16_t Get_Crc16(uint8_t *ptr, uint16_t length, uint16_t init_dat);
+  19          ModbusPools Spool;
+  20          
+  21          /*静态函数声明*/
+  22          // static void Modbus_TI_Recive(pModbusHandle pd, DMA_HandleTypeDef *hdma);
+  23          static void Modbus_Poll(pModbusHandle pd);
+  24          static void Modbus_Send(pModbusHandle pd, enum Using_Crc crc);
+  25          #if defined(USING_MASTER)
+  26          static void Modbus_46H(pModbusHandle pd, uint16_t regaddr, uint8_t *pdat, uint8_t datalen);
+  27          #endif
+  28          // static uint8_t Modbus_Operatex(pModbusHandle pd, uint16_t addr, uint8_t *pdat, uint8_t len);
+  29          // static uint8_t Modbus_Operatex(pModbusHandle pd, uint16_t addr, uint8_t *pdat, uint8_t len);
+  30          #if defined(USING_COIL) || defined(USING_INPUT_COIL)
+  31          static void Modus_ReadXCoil(pModbusHandle pd);
+  32          static void Modus_WriteCoil(pModbusHandle pd);
+  33          #endif
+  34          #if defined(USING_INPUT_REGISTER) || defined(USING_HOLD_REGISTER)
+  35          static void Modus_ReadXRegister(pModbusHandle pd);
+  36          static void Modus_WriteHoldRegister(pModbusHandle pd);
+  37          #endif
+  38          static void Modus_ReportSeverId(pModbusHandle pd);
+  39          static void Modbus_CallBack(pModbusHandle pd);
+  40          
+  41          static uint8_t mtx_buf[128];
+  42          /*定义Modbus对象*/
+  43          ModbusHandle Modbus_Object = {
+  44              0x02,
+  45              Modbus_Poll,
+  46              Modbus_Send,
+  47              Modbus_46H,
+  48              // Modbus_Operatex,
+  49              Modus_ReadXCoil,
+  50              Modus_WriteCoil,
+  51          #if defined(USING_INPUT_REGISTER) || defined(USING_HOLD_REGISTER)
+  52              Modus_ReadXRegister,
+  53              Modus_WriteHoldRegister,
+  54              Modbus_CallBack,
+C51 COMPILER V9.60.0.0   MODBUS                                                            08/03/2022 21:14:11 PAGE 2   
+
+  55          #endif
+  56              // Modus_ReportSeverId,
+  57              {mtx_buf, sizeof(mtx_buf), 0},
+  58              {NULL, 0, &discharger.Storage, InputCoil, &Spool, Read},
+  59              &Uart2,
+  60          };
+  61          
+  62          void Modbus_Handle(void)
+  63          {
+  64   1          Modbus_Object.Mod_Poll(&Modbus_Object);
+  65   1      }
+  66          
+  67          // /**
+  68          //  * @brief  创建Modbus协议站对象
+  69          //  * @param  pd 需要初始化对象指针
+  70          //  * @param  ps 初始化数据指针
+  71          //  * @retval None
+  72          //  */
+  73          // static void Create_ModObject(pModbusHandle *pd, pModbusHandle ps)
+  74          // {
+  75          //     if (!ps)
+  76          //         return;
+  77          //     (*pd) = (pModbusHandle)CUSTOM_MALLOC(sizeof(MdbusHandle));
+  78          //     if (!(*pd))
+  79          //         CUSTOM_FREE(*pd);
+  80          //     // #if defined(USING_FREERTOS)
+  81          //     uint8_t *pTxbuf = (uint8_t *)CUSTOM_MALLOC(ps->Master.TxSize);
+  82          //     if (!pTxbuf)
+  83          //     {
+  84          // #if defined(USING_DEBUG)
+  85          //         Debug("pTxbuf Creation failed!\r\n");
+  86          // #endif
+  87          //         CUSTOM_FREE(pTxbuf);
+  88          //         return;
+  89          //     }
+  90          //     uint8_t *pRxbuf = (uint8_t *)CUSTOM_MALLOC(ps->Slave.RxSize);
+  91          //     if (!pRxbuf)
+  92          //     {
+  93          // #if defined(USING_DEBUG)
+  94          //         Debug("pRxbuf Creation failed!\r\n");
+  95          // #endif
+  96          //         CUSTOM_FREE(pRxbuf);
+  97          //         return;
+  98          //     }
+  99          
+ 100          //     // #endif
+ 101          
+ 102          //     memset(pTxbuf, 0x00, ps->Master.TxSize);
+ 103          //     memset(pRxbuf, 0x00, ps->Slave.RxSize);
+ 104          // #if defined(USING_DEBUG)
+ 105          // #if defined(USING_FREERTOS)
+ 106          //     shellPrint(Shell_Object, "Dwin[%d]_handler = 0x%p\r\n", ps->Id, *pd);
+ 107          // #else
+ 108          //     Debug("Modbus[%d]_handler = 0x%p\r\n", ps->Slave_Id, *pd);
+ 109          // #endif
+ 110          // #endif
+ 111          //     (*pd)->Slave_Id = ps->Slave_Id;
+ 112          //     (*pd)->Mod_TI_Recive = Modbus_TI_Recive;
+ 113          //     (*pd)->Mod_Poll = Modbus_Poll;
+ 114          //     (*pd)->Mod_Transmit = Modbus_Send;
+ 115          // #if defined(USING_MASTER)
+ 116          //     (*pd)->Mod_Code46H = Modbus_46H;
+C51 COMPILER V9.60.0.0   MODBUS                                                            08/03/2022 21:14:11 PAGE 3   
+
+ 117          // #endif
+ 118          //     (*pd)->Mod_Operatex = Modbus_Operatex;
+ 119          // #if defined(USING_COIL) || defined(USING_INPUT_COIL)
+ 120          //     (*pd)->Mod_ReadXCoil = Modus_ReadXCoil;
+ 121          //     (*pd)->Mod_WriteCoil = Modus_WriteCoil;
+ 122          // #endif
+ 123          // #if defined(USING_INPUT_REGISTER) || defined(USING_HOLD_REGISTER)
+ 124          //     (*pd)->Mod_ReadXRegister = Modus_ReadXRegister;
+ 125          //     (*pd)->Mod_WriteHoldRegister = Modus_WriteHoldRegister;
+ 126          // #endif
+ 127          //     (*pd)->Mod_ReportSeverId = Modus_ReportSeverId;
+ 128          //     (*pd)->Master.pTbuf = pTxbuf;
+ 129          //     (*pd)->Master.TxCount = 0U;
+ 130          //     (*pd)->Master.TxSize = ps->Master.TxSize;
+ 131          //     (*pd)->Slave.pRbuf = pRxbuf;
+ 132          //     (*pd)->Slave.RxSize = ps->Slave.RxSize;
+ 133          //     (*pd)->Slave.RxCount = 0U;
+ 134          //     (*pd)->Slave.pPools = ps->Slave.pPools;
+ 135          //     // (*pd)->Slave.pMap = ps->Slave.pMap;
+ 136          //     // (*pd)->Slave.Events_Size = ps->Slave.Events_Size;
+ 137          //     (*pd)->Slave.pHandle = ps->Slave.pHandle;
+ 138          // #if !defined(USING_FREERTOS)
+ 139          //     (*pd)->Slave.Recive_FinishFlag = false;
+ 140          // #endif
+ 141          //     (*pd)->huart = ps->huart;
+ 142          // }
+ 143          
+ 144          // /**
+ 145          //  * @brief  销毁modbus对象
+ 146          //  * @param  pd 需要初始化对象指针
+ 147          //  * @retval None
+ 148          //  */
+ 149          // void Free_ModObject(pModbusHandle *pd)
+ 150          // {
+ 151          //     if (*pd)
+ 152          //     {
+ 153          //         CUSTOM_FREE((*pd)->Master.pTbuf);
+ 154          //         CUSTOM_FREE((*pd)->Slave.pRbuf);
+ 155          //         CUSTOM_FREE((*pd));
+ 156          //     }
+ 157          // }
+ 158          
+ 159          // /**
+ 160          //  * @brief  初始化Modbus协议库
+ 161          //  * @retval None
+ 162          //  */
+ 163          // void MX_ModbusInit(void)
+ 164          // {
+ 165          // #define SLAVE_MAX 0x0F
+ 166          //     /*读板标志*/
+ 167          //     static uint8_t Read_Flag = false;
+ 168          //     // extern Save_HandleTypeDef Save_Flash;
+ 169          //     MdbusHandle Modbus;
+ 170          //     uint8_t slave_id = Get_CardId() & 0x0F;
+ 171          
+ 172          //     // Modbus.Slave_Id = SLAVE_ADDRESS;
+ 173          // #if defined(USING_DEBUG)
+ 174          //     Debug("Board id is 0x%02x, slave id is 0x%02x.\r\n", Get_CardId(), slave_id);
+ 175          // #endif
+ 176          
+ 177          //     /*从站ID通过卡槽编码确定*/
+ 178          //     Modbus.Slave_Id = (slave_id <= SLAVE_MAX) ? slave_id : SLAVE_MAX + 1U;
+C51 COMPILER V9.60.0.0   MODBUS                                                            08/03/2022 21:14:11 PAGE 4   
+
+ 179          //     // Modbus.Slave_Id = 0x00;
+ 180          //     Modbus.Master.TxSize = MOD_TX_BUF_SIZE;
+ 181          //     Modbus.Slave.RxSize = MOD_RX_BUF_SIZE;
+ 182          //     // Modbus.Slave.pMap = Modbus_ObjMap;
+ 183          //     // Modbus.Slave.Events_Size = Modbus_EventSize;
+ 184          //     Modbus.Slave.pHandle = &Read_Flag;
+ 185          //     /*定义迪文屏幕使用目标串口*/
+ 186          //     Modbus.huart = &huart1;
+ 187          //     // memset(&Spool, 0x00, sizeof(ModbusPools));
+ 188          //     /*寄存器池*/
+ 189          //     Modbus.Slave.pPools = &Spool;
+ 190          // /*使用屏幕接收处理时*/
+ 191          // #define TYPEDEF_STRUCT uint8_t
+ 192          //     Create_ModObject(&Modbus_Object, &Modbus);
+ 193          // }
+ 194          
+ 195          // /**
+ 196          //  * @brief  Modbus在接收中中断接收数据
+ 197          //  * @param  pd 迪文屏幕对象句柄
+ 198          //  * @retval None
+ 199          //  */
+ 200          // static void Modbus_TI_Recive(pModbusHandle pd, DMA_HandleTypeDef *hdma)
+ 201          // {
+ 202          //     /*Gets the idle flag so that the idle flag is set*/
+ 203          //     if ((__HAL_UART_GET_FLAG(pd->huart, UART_FLAG_IDLE) != RESET))
+ 204          //     {
+ 205          //         /*Clear idle interrupt flag*/
+ 206          //         __HAL_UART_CLEAR_IDLEFLAG(pd->huart);
+ 207          //         if (pd && (pd->Slave.pRbuf))
+ 208          //         {
+ 209          //             /*Stop DMA transmission to prevent busy receiving data and interference during data process
+             -ing*/
+ 210          //             HAL_UART_DMAStop(pd->huart);
+ 211          //             /*Get the number of untransmitted data in DMA*/
+ 212          //             /*Number received = buffersize - the number of data units remaining in the current DMA chan
+             -nel transmission */
+ 213          //             pd->Slave.RxCount = pd->Slave.RxSize - __HAL_DMA_GET_COUNTER(hdma);
+ 214          //             /*Reopen DMA reception*/
+ 215          //             HAL_UART_Receive_DMA(pd->huart, pd->Slave.pRbuf, pd->Slave.RxSize);
+ 216          //         }
+ 217          // #if defined(USING_FREERTOS)
+ 218          //         /*After opening the serial port interrupt, the semaphore has not been created*/
+ 219          //         if (Recive_Uart1Handle != NULL)
+ 220          //         {
+ 221          //             /*Notification task processing*/
+ 222          //             osSemaphoreRelease(Recive_Uart1Handle);
+ 223          //         }
+ 224          // #else
+ 225          //         pd->Slave.Recive_FinishFlag = true;
+ 226          // #endif
+ 227          //     }
+ 228          // }
+ 229          
+ 230          #define MOD_WORD 1U
+ 231          #define MOD_DWORD 2U
+ 232          /*获取主机号*/
+ 233          #define Get_ModId(__obj) ((__obj)->Slave.pRbuf[0U])
+ 234          /*获取Modbus功能号*/
+ 235          #define Get_ModFunCode(__obj) ((__obj)->Slave.pRbuf[1U])
+ 236          /*获取Modbus协议数据*/
+ 237          #define Get_Data(__ptr, __s, __size)                                                                      
+             -     \
+C51 COMPILER V9.60.0.0   MODBUS                                                            08/03/2022 21:14:11 PAGE 5   
+
+ 238              ((__size) < 2U ? ((uint16_t)((__ptr)->Slave.pRbuf[__s] << 8U) | ((__ptr)->Slave.pRbuf[__s + 1U]))     
+             -     \
+ 239                             : ((uint32_t)((__ptr)->Slave.pRbuf[__s] << 24U) | ((__ptr)->Slave.pRbuf[__s + 1U] << 16
+             -U) | \
+ 240                                ((__ptr)->Slave.pRbuf[__s + 2U] << 8U) | ((__ptr)->Slave.pRbuf[__s + 3U])))
+ 241          
+ 242          /**
+ 243           * @brief  Modbus从机响应回调
+ 244           * @param  pd 迪文屏幕对象句柄
+ 245           * @retval None
+ 246           */
+ 247          static void Modbus_CallBack(pModbusHandle pd)
+ 248          {
+ 249   1          Storage_TypeDef *ps = (Storage_TypeDef *)pd->Slave.pHandle;
+ 250   1          pDwinHandle pdw = &Dwin_Object;
+ 251   1          uint16_t addr = 0, dat = 0, *pdat;
+ 252   1          uint8_t save_flag = false;
+ 253   1      
+ 254   1          addr = Get_Data(pd, 2U, MOD_WORD);
+ 255   1          dat = Get_Data(pd, 4U, MOD_WORD);
+ 256   1      
+ 257   1          if (ps)
+ 258   1          {
+ 259   2              pdat = &ps->Slave_Id;
+ 260   2              switch (Get_ModFunCode(pd))
+ 261   2              {
+ 262   3              case WriteCoil:
+ 263   3              { /*初始化时需要同时更新该寄存器*/
+ 264   4                  if (!addr)
+ 265   4                  {
+ 266   5                      dat                                        ? __SET_FLAG(ps->flag, P_Limit_Enable),
+ 267   5                          __RESET_FLAG(ps->flag, I_Limit_Enable) : (__SET_FLAG(ps->flag, I_Limit_Enable), __RESE
+             -T_FLAG(ps->flag, P_Limit_Enable));
+ 268   5                      save_flag = true;
+ 269   5                  }
+ 270   4              }
+ 271   3              break;
+ 272   3              case WriteHoldReg:
+ 273   3              {
+ 274   4      
+ 275   4                  if ((dat >= pdw->Slave.pMap[addr].lower) && (dat <= pdw->Slave.pMap[addr].upper) &&
+ 276   4                      addr < pdw->Slave.Events_Size)
+ 277   4                  {
+ 278   5                      pdat[addr] = dat;
+ 279   5                      save_flag = true;
+ 280   5                  }
+ 281   4                  else
+ 282   4                  {
+ 283   5                      /*保存原值不变:数据写回保持寄存器*/
+ 284   5                      pd->Slave.Reg_Type = HoldRegister;
+ 285   5                      pd->Slave.Operate = Write;
+ 286   5                      /*读取对应寄存器*/
+ 287   5                      if (!Modbus_Operatex(pd, addr, (uint8_t *)&pdat[addr], sizeof(uint16_t)))
+ 288   5                      {
+ 289   6      #if defined(USING_DEBUG)
+                                  Debug("Coil reading failed!\r\n");
+                                  return;
+              #endif
+ 293   6                      }
+ 294   5                  }
+ 295   4              }
+ 296   3              break;
+C51 COMPILER V9.60.0.0   MODBUS                                                            08/03/2022 21:14:11 PAGE 6   
+
+ 297   3              default:
+ 298   3                  break;
+ 299   3              }
+ 300   2              if (save_flag)
+ 301   2              {
+ 302   3                  __SET_FLAG(ps->flag, Save_Flag);
+ 303   3                  Dwin_Save(pdw);
+ 304   3              }
+ 305   2          }
+ 306   1      }
+ 307          
+ 308          /**
+ 309           * @brief  Modbus接收数据解析
+ 310           * @param  pd 迪文屏幕对象句柄
+ 311           * @retval None
+ 312           */
+ 313          static void Modbus_Poll(pModbusHandle pd)
+ 314          {
+ 315   1          uint16_t crc16 = 0;
+ 316   1      #if !defined(USING_FREERTOS)
+ 317   1          // if (pd->Slave.Recive_FinishFlag)
+ 318   1          {
+ 319   2              // pd->Slave.Recive_FinishFlag = false;
+ 320   2      #endif /*首次调度时RXcount值被清零，导致计算crc时地址越界*/
+ 321   2              if (pd->Slave.RxCount > 2U)
+ 322   2                  crc16 = Get_Crc16(pd->Slave.pRbuf, pd->Slave.RxCount - 2U, 0xffff);
+ 323   2      #if defined(USING_DEBUG)
+                      Debug("rxcount = %d,crc16 = 0x%X.\r\n", pd->Slave.RxCount, (uint16_t)((crc16 >> 8U) | (crc16 << 8U
+             -)));
+              #endif
+ 326   2              crc16 = (crc16 >> 8U) | (crc16 << 8U);
+ 327   2              /*检查是否是目标从站*/
+ 328   2              if ((Get_ModId(pd) == pd->Slave_Id) &&
+ 329   2                  (Get_Data(pd, pd->Slave.RxCount - 2U, MOD_WORD) == crc16))
+ 330   2              {
+ 331   3      #if defined(USING_DEBUG)
+                          Debug("Data received!\r\n");
+                          for (uint8_t i = 0; i < pd->Slave.RxCount; i++)
+                          {
+                              Debug("prbuf[%d] = 0x%X\r\n", i, pd->Slave.pRbuf[i]);
+                          }
+              #endif
+ 338   3                  switch (Get_ModFunCode(pd))
+ 339   3                  {
+ 340   4      #if defined(USING_COIL) || defined(USING_INPUT_COIL)
+ 341   4                  case ReadCoil:
+ 342   4                  case ReadInputCoil:
+ 343   4                  {
+ 344   5                      pd->Mod_ReadXCoil(pd);
+ 345   5                  }
+ 346   4                  break;
+ 347   4                  case WriteCoil:
+ 348   4                  case WriteCoils:
+ 349   4                  {
+ 350   5                      pd->Mod_WriteCoil(pd);
+ 351   5                      pd->Mod_CallBack(pd);
+ 352   5                  }
+ 353   4                  break;
+ 354   4      #endif
+ 355   4      #if defined(USING_INPUT_REGISTER) || defined(USING_HOLD_REGISTER)
+ 356   4                  case ReadHoldReg:
+ 357   4                  case ReadInputReg:
+C51 COMPILER V9.60.0.0   MODBUS                                                            08/03/2022 21:14:11 PAGE 7   
+
+ 358   4                  {
+ 359   5                      pd->Mod_ReadXRegister(pd);
+ 360   5                  }
+ 361   4                  break;
+ 362   4                  case WriteHoldReg:
+ 363   4                  case WriteHoldRegs:
+ 364   4                  {
+ 365   5                      pd->Mod_WriteHoldRegister(pd);
+ 366   5                      pd->Mod_CallBack(pd);
+ 367   5                  }
+ 368   4                  break;
+ 369   4      #endif
+ 370   4                  case ReportSeverId:
+ 371   4                  {
+ 372   5                      //                pd->Mod_ReportSeverId(pd);
+ 373   5                      /**/
+ 374   5                      if (pd->Slave.pHandle)
+ 375   5                      {
+ 376   6                          *(TYPEDEF_STRUCT *)pd->Slave.pHandle = true;
+ 377   6                      }
+ 378   5                  }
+ 379   4                  break;
+ 380   4                  default:
+ 381   4                      break;
+ 382   4                  }
+ 383   3              }
+ 384   2              memset(pd->Slave.pRbuf, 0x00, pd->Slave.RxCount);
+ 385   2              pd->Slave.RxCount = 0U;
+ 386   2      #if !defined(USING_FREERTOS)
+ 387   2          }
+ 388   1      #endif
+ 389   1      }
+ 390          
+ 391          /*获取寄存器类型*/
+ 392          #define Get_RegType(__obj, __type) \
+ 393              ((__type) < InputRegister ? (__obj)->Slave.pPools->Coils : (__obj)->Slave.pPools->InputRegister)
+ 394          
+ 395          /*获取寄存器地址*/
+ 396          #if defined(USING_COIL) && defined(USING_INPUT_COIL) && defined(USING_INPUT_REGISTER) && defined(USING_HOL
+             -D_REGISTER)
+ 397          #define Get_RegAddr(__obj, __type, __addr)                                        \
+ 398              ((__type) == Coil                                                             \
+ 399                   ? (uint8_t *)&(__obj)->Slave.pPools->Coils[__addr]                       \
+ 400                   : ((__type) == InputCoil                                                 \
+ 401                          ? (uint8_t *)&(__obj)->Slave.pPools->InputCoils[__addr]           \
+ 402                          : ((__type) == InputRegister                                      \
+ 403                                 ? (uint8_t *)&(__obj)->Slave.pPools->InputRegister[__addr] \
+ 404                                 : (uint8_t *)&(__obj)->Slave.pPools->HoldRegister[__addr])))
+ 405          #elif defined(USING_COIL) || defined(USING_INPUT_COIL)
+              #define Get_RegAddr(__obj, __type, __addr) \
+                  ((__type) == Coil ? (uint8_t *)&(__obj)->Slave.pPools->Coils[__addr] : (uint8_t *)&(__obj)->Slave.pPoo
+             -ls->InputCoils[__addr])
+              #elif defined(USING_INPUT_REGISTER) || defined(USING_HOLD_REGISTER)
+              #define Get_RegAddr(__obj, __type, __addr) \
+                  ((__type) == InputRegister ? (uint8_t *)&(__obj)->Slave.pPools->InputRegister[__addr] : (uint8_t *)&(_
+             -_obj)->Slave.pPools->HoldRegister[__addr])
+              #else
+              #define Get_RegAddr(__obj, __type, __addr) (__obj, __type, __addr)
+              #endif
+ 414          
+ 415          /**
+ 416           * @brief  Modbus协议读取/写入寄存器
+C51 COMPILER V9.60.0.0   MODBUS                                                            08/03/2022 21:14:11 PAGE 8   
+
+ 417           * @param  pd 需要初始化对象指针
+ 418           * @param  regaddr 寄存器地址[寄存器起始地址从1开始]
+ 419           * @param  pdat 数据指针
+ 420           * @param  len  读取数据长度
+ 421           * @retval None
+ 422           */
+ 423          uint8_t Modbus_Operatex(pModbusHandle pd, uint16_t addr, uint8_t *pdat, uint8_t len)
+ 424          {
+ 425   1          // uint16_t offset = pd->Slave.Reg_Type > Coil ? (pd->Slave.Reg_Type + 10000U) : 1U;
+ 426   1          uint8_t max = pd->Slave.Reg_Type < InputRegister ? REG_POOL_SIZE : REG_POOL_SIZE * 2U;
+ 427   1          // uint8_t reg_addr = addr - 1U, *pDest, *pSou;
+ 428   1          uint8_t *pDest, *pSou;
+ 429   1          // typeof(Get_RegType(pd, pd->Slave.Reg_Type)) *paddr;
+ 430   1          uint8_t ret = false;
+ 431   1      #if defined(USING_DEBUG)
+                  // if (addr < 1U)
+                  // {
+                  //     Debug("Error: Register address must be > = 1.\r\n");
+                  // }
+              #endif
+ 437   1          // if (reg_addr < max)
+ 438   1          if ((addr < max) && (len < max))
+ 439   1          {
+ 440   2      #if defined(USING_COIL) || defined(USING_INPUT_COIL) || defined(USING_INPUT_REGISTER) || defined(USING_HOL
+             -D_REGISTER)
+ 441   2              if (pd->Slave.Operate == Read)
+ 442   2              {
+ 443   3                  pDest = pdat, pSou = Get_RegAddr(pd, pd->Slave.Reg_Type, addr);
+ 444   3                  // pd->Slave.pPools->Coils[0] = 0x000;
+ 445   3                  // pDest = (uint8_t *)Get_RegType(pd, pd->Slave.Reg_Type);
+ 446   3              }
+ 447   2              else
+ 448   2              {
+ 449   3                  pDest = Get_RegAddr(pd, pd->Slave.Reg_Type, addr), pSou = pdat;
+ 450   3              }
+ 451   2      #endif
+ 452   2      #if defined(USING_DEBUG)
+                      // Debug("pdest[%p] = 0x%X, psou[%p]= 0x%X, len= %d.\r\n", pDest, *pDest, pSou, *pSou, len);
+              #endif
+ 455   2              if (memcpy(pDest, pSou, len))
+ 456   2                  ret = true;
+ 457   2          }
+ 458   1          return ret;
+ 459   1      }
+ 460          
+ 461          /**
+ 462           * @brief  Modbus协议主站有人云拓展46指令
+ 463           * @param  pd 需要初始化对象指针
+ 464           * @param  regaddr 寄存器地址
+ 465           * @param  pdata 数据指针
+ 466           * @param  datalen 数据长度
+ 467           * @retval None
+ 468           */
+ 469          #if defined(USING_MASTER)
+ 470          static void Modbus_46H(pModbusHandle pd, uint16_t regaddr, uint8_t *pdat, uint8_t datalen)
+ 471          {
+ 472   1      #define MASTER_FUNCTION_CODE 0x46
+ 473   1          uint8_t buf[] = {0, MASTER_FUNCTION_CODE, 0, 0, 0, 0, 0};
+ 474   1          buf[0] = pd->Slave_Id, buf[2] = regaddr >> 8U, buf[3] = regaddr,
+ 475   1          buf[4] = (datalen / 2U) >> 8U, buf[5] = (datalen / 2U), buf[6] = datalen;
+ 476   1      
+ 477   1          memset(pd->Master.pTbuf, 0x00, pd->Master.TxSize);
+C51 COMPILER V9.60.0.0   MODBUS                                                            08/03/2022 21:14:11 PAGE 9   
+
+ 478   1          pd->Master.TxCount = 0U;
+ 479   1          memcpy(pd->Master.pTbuf, buf, sizeof(buf));
+ 480   1          pd->Master.TxCount += sizeof(buf);
+ 481   1          memcpy(&pd->Master.pTbuf[pd->Master.TxCount], pdat, datalen);
+ 482   1          pd->Master.TxCount += datalen;
+ 483   1      
+ 484   1          pd->Mod_Transmit(pd, UsedCrc);
+ 485   1      }
+ 486          #endif
+ 487          
+ 488          /**
+ 489           * @brief  Modbus协议读取线圈和输入线圈状态(0x01\0x02)
+ 490           * @param  pd 需要初始化对象指针
+ 491           * @retval None
+ 492           */
+ 493          #if defined(USING_COIL) || defined(USING_INPUT_COIL)
+ 494          static void Modus_ReadXCoil(pModbusHandle pd)
+ 495          {
+ 496   1      #define Byte_To_Bits 8U
+ 497   1          uint8_t len = Get_Data(pd, 4U, MOD_WORD);
+ 498   1          uint8_t bytes = len / Byte_To_Bits + !!(len % Byte_To_Bits);
+ 499   1          uint8_t buf[REG_POOL_SIZE * 2U], *prbits = &buf;
+ 500   1          uint8_t i = 0, j = 0;
+ 501   1          // uint8_t bits = 0x00;
+ 502   1          if (len < sizeof(buf))
+ 503   1          {
+ 504   2              memset(prbits, 0x00, len);
+ 505   2              /*必须清除pbuf，原因是：519行漏洞*/
+ 506   2              memset(pd->Master.pTbuf, 0x00, pd->Master.TxSize);
+ 507   2              pd->Master.TxCount = 0U;
+ 508   2              memcpy(pd->Master.pTbuf, pd->Slave.pRbuf, 2U);
+ 509   2              pd->Master.TxCount += 2U;
+ 510   2              pd->Master.pTbuf[pd->Master.TxCount++] = bytes;
+ 511   2              /*通过功能码寻址寄存器*/
+ 512   2              pd->Slave.Reg_Type = Get_ModFunCode(pd) == ReadCoil ? Coil : InputCoil;
+ 513   2              pd->Slave.Operate = Read;
+ 514   2              // pd->Mod_Operatex(pd, Get_Data(pd, 2U, MOD_WORD), prbits, len);
+ 515   2              Modbus_Operatex(pd, Get_Data(pd, 2U, MOD_WORD), prbits, len);
+ 516   2      #if defined(USING_DEBUG)
+                      for (uint8_t i = 0; i < len; i++)
+                          Debug("prbits[%d] = 0x%X, len= %d.\r\n", i, prbits[i], len);
+              #endif
+ 520   2              for (; i < bytes; i++)
+ 521   2              {
+ 522   3                  for (; j < Byte_To_Bits && (i * Byte_To_Bits + j) < len; j++)
+ 523   3                  {
+ 524   4                      uint8_t _bit = (prbits[i * Byte_To_Bits + j] & 0x01);
+ 525   4                      if (_bit)
+ 526   4                          pd->Master.pTbuf[pd->Master.TxCount] |= (_bit << j);
+ 527   4                      else
+ 528   4                          pd->Master.pTbuf[pd->Master.TxCount] &= ~(_bit << j);
+ 529   4      #if defined(USING_DEBUG)
+                              Debug("pTbuf[%d] = 0x%X, j= %d.\r\n", i, pd->Master.pTbuf[pd->Master.TxCount], j);
+              #endif
+ 532   4                  }
+ 533   3                  pd->Master.TxCount++;
+ 534   3              }
+ 535   2      #if defined(USING_DEBUG)
+                      Debug("pd->Master.TxCount = %d.\r\n", pd->Master.TxCount);
+              #endif
+ 538   2              pd->Mod_Transmit(pd, UsedCrc);
+ 539   2          }
+C51 COMPILER V9.60.0.0   MODBUS                                                            08/03/2022 21:14:11 PAGE 10  
+
+ 540   1      }
+ 541          
+ 542          /**
+ 543           * @brief  Modbus协议写线圈/线圈组(0x05\0x0F)
+ 544           * @param  pd 需要初始化对象指针
+ 545           * @retval None
+ 546           */
+ 547          static void Modus_WriteCoil(pModbusHandle pd)
+ 548          {
+ 549   1          uint8_t *pdat = NULL, len = 0x00, i = 0;
+ 550   1          enum Using_Crc crc;
+ 551   1      
+ 552   1          /*通过功能码寻址寄存器*/
+ 553   1          pd->Slave.Reg_Type = Coil;
+ 554   1          pd->Slave.Operate = Write;
+ 555   1          /*写单个线圈*/
+ 556   1          if (Get_ModFunCode(pd) == WriteCoil)
+ 557   1          {
+ 558   2              uint8_t wbit = !!(Get_Data(pd, 4U, MOD_WORD) == 0xFF00);
+ 559   2              len = 1U;
+ 560   2              pdat = &wbit;
+ 561   2              pd->Master.TxCount = pd->Slave.RxCount;
+ 562   2              crc = NotUsedCrc;
+ 563   2          }
+ 564   1          /*写多个线圈*/
+ 565   1          else
+ 566   1          {
+ 567   2              len = Get_Data(pd, 4U, MOD_WORD);
+ 568   2              /*利用发送缓冲区空间暂存数据*/
+ 569   2              pdat = pd->Master.pTbuf;
+ 570   2      
+ 571   2              for (; i < len; i++)
+ 572   2              {
+ 573   3                  pdat[i] = (pd->Slave.pRbuf[7U + i / Byte_To_Bits] >> (i % Byte_To_Bits)) & 0x01;
+ 574   3              }
+ 575   2              pd->Master.TxCount = 6U;
+ 576   2              crc = UsedCrc;
+ 577   2          }
+ 578   1      #if defined(USING_DEBUG)
+                  Debug("pdata = 0x%X, len= %d.\r\n", *pdat, len);
+              #endif
+ 581   1          if (pdat)
+ 582   1              // pd->Mod_Operatex(pd, Get_Data(pd, 2U, MOD_WORD), pdat, len);
+ 583   1              Modbus_Operatex(pd, Get_Data(pd, 2U, MOD_WORD), pdat, len);
+ 584   1          // memset(pd->Master.pTbuf, 0x00, pd->Master.TxSize);
+ 585   1          /*请求数据原路返回*/
+ 586   1          memcpy(pd->Master.pTbuf, pd->Slave.pRbuf, pd->Master.TxCount);
+ 587   1          pd->Mod_Transmit(pd, crc);
+ 588   1      }
+ 589          #endif
+ 590          
+ 591          /**
+ 592           * @brief  Modbus协议读输入寄存器/保持寄存器(0x03\0x04)
+ 593           * @param  pd 需要初始化对象指针
+ 594           * @retval None
+ 595           */
+ 596          #if defined(USING_INPUT_REGISTER) || defined(USING_HOLD_REGISTER)
+ 597          static void Modus_ReadXRegister(pModbusHandle pd)
+ 598          {
+ 599   1          uint8_t len = Get_Data(pd, 4U, MOD_WORD) * sizeof(uint16_t);
+ 600   1          uint8_t buf[REG_POOL_SIZE * 2U], *prdata = &buf;
+ 601   1      
+C51 COMPILER V9.60.0.0   MODBUS                                                            08/03/2022 21:14:11 PAGE 11  
+
+ 602   1          if (!prdata < sizeof(buf))
+ 603   1          {
+ 604   2              memset(prdata, 0x00, len);
+ 605   2              memset(pd->Master.pTbuf, 0x00, pd->Master.TxSize);
+ 606   2              pd->Master.TxCount = 0U;
+ 607   2              memcpy(pd->Master.pTbuf, pd->Slave.pRbuf, 2U);
+ 608   2              pd->Master.TxCount += 2U;
+ 609   2              pd->Master.pTbuf[pd->Master.TxCount] = len;
+ 610   2              pd->Master.TxCount += sizeof(len);
+ 611   2              /*通过功能码寻址寄存器*/
+ 612   2              pd->Slave.Reg_Type = Get_ModFunCode(pd) == ReadHoldReg ? HoldRegister : InputRegister;
+ 613   2              pd->Slave.Operate = Read;
+ 614   2              // pd->Mod_Operatex(pd, Get_Data(pd, 2U, MOD_WORD), prdata, len);
+ 615   2              Modbus_Operatex(pd, Get_Data(pd, 2U, MOD_WORD), prdata, len);
+ 616   2              memcpy(&pd->Master.pTbuf[pd->Master.TxCount], prdata, len);
+ 617   2              pd->Master.TxCount += len;
+ 618   2      
+ 619   2              pd->Mod_Transmit(pd, UsedCrc);
+ 620   2          }
+ 621   1      }
+ 622          
+ 623          /**
+ 624           * @brief  Modbus协议写保持寄存器/多个保持寄存器(0x06/0x10)
+ 625           * @param  pd 需要初始化对象指针
+ 626           * @retval None
+ 627           */
+ 628          static void Modus_WriteHoldRegister(pModbusHandle pd)
+ 629          {
+ 630   1          uint8_t *pdat = NULL, len = 0x00;
+ 631   1          enum Using_Crc crc;
+ 632   1      
+ 633   1          pd->Slave.Reg_Type = HoldRegister;
+ 634   1          pd->Slave.Operate = Write;
+ 635   1          /*写单个保持寄存器*/
+ 636   1          if (Get_ModFunCode(pd) == WriteHoldReg)
+ 637   1          {
+ 638   2              len = sizeof(uint16_t);
+ 639   2              /*改变数据指针*/
+ 640   2              pdat = &pd->Slave.pRbuf[4U];
+ 641   2              pd->Master.TxCount = pd->Slave.RxCount;
+ 642   2              crc = NotUsedCrc;
+ 643   2          }
+ 644   1          else
+ 645   1          {
+ 646   2              len = pd->Slave.pRbuf[6U];
+ 647   2              /*改变数据指针*/
+ 648   2              pdat = &pd->Slave.pRbuf[7U];
+ 649   2              pd->Master.TxCount = 6U;
+ 650   2              crc = UsedCrc;
+ 651   2          }
+ 652   1          if (pdat)
+ 653   1              // pd->Mod_Operatex(pd, Get_Data(pd, 2U, MOD_WORD), pdat, len);
+ 654   1              Modbus_Operatex(pd, Get_Data(pd, 2U, MOD_WORD), pdat, len);
+ 655   1          /*请求数据原路返回*/
+ 656   1          memcpy(pd->Master.pTbuf, pd->Slave.pRbuf, pd->Master.TxCount);
+ 657   1          pd->Mod_Transmit(pd, crc);
+ 658   1      }
+ 659          #endif
+ 660          
+ 661          /**
+ 662           * @brief  Modbus协议上报一些特定信息
+ 663           * @param  pd 需要初始化对象指针
+C51 COMPILER V9.60.0.0   MODBUS                                                            08/03/2022 21:14:11 PAGE 12  
+
+ 664           * @retval None
+ 665           */
+ 666          // static void Modus_ReportSeverId(pModbusHandle pd)
+ 667          // {
+ 668          //     // extern TIM_HandleTypeDef htim1;
+ 669          //     // HAL_TIM_Base_Stop_IT(&htim1);
+ 670          //     // memset(pd->Master.pTbuf, 0x00, pd->Master.TxSize);
+ 671          //     pd->Master.TxCount = 0U;
+ 672          //     memcpy(pd->Master.pTbuf, pd->Slave.pRbuf, 2U);
+ 673          //     pd->Master.TxCount += 2U;
+ 674          //     pd->Master.pTbuf[pd->Master.TxCount++] = sizeof(uint8_t);
+ 675          //     /*读取卡槽与板卡编码*/
+ 676          //     pd->Master.pTbuf[pd->Master.TxCount++] = Get_CardId();
+ 677          //     pd->Mod_Transmit(pd, UsedCrc);
+ 678          //     // HAL_TIM_Base_Start_IT(&htim1);
+ 679          // }
+ 680          
+ 681          /**
+ 682           * @brief  Modbus协议发送
+ 683           * @param  pd 需要初始化对象指针
+ 684           * @retval None
+ 685           */
+ 686          static void Modbus_Send(pModbusHandle pd, enum Using_Crc crc)
+ 687          {
+ 688   1          if (crc == UsedCrc)
+ 689   1          {
+ 690   2              uint16_t crc16 = Get_Crc16(pd->Master.pTbuf, pd->Master.TxCount, 0xffff);
+ 691   2      
+ 692   2              crc16 = (crc16 >> 8U) | (crc16 << 8U);
+ 693   2              memcpy(&pd->Master.pTbuf[pd->Master.TxCount], (uint8_t *)&crc16, sizeof(crc16));
+ 694   2              pd->Master.TxCount += sizeof(crc16);
+ 695   2          }
+ 696   1          if (pd->huart)
+ 697   1              Uartx_SendStr(pd->huart, pd->Master.pTbuf, pd->Master.TxCount, UART_BYTE_SENDOVERTIME);
+ 698   1      
+ 699   1          // HAL_UART_Transmit_DMA(pd->huart, pd->Master.pTbuf, pd->Master.TxCount);
+ 700   1          // while (__HAL_UART_GET_FLAG(pd->huart, UART_FLAG_TC) == RESET)
+ 701   1          // {
+ 702   1          // }
+ 703   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   3276    ----
+   CONSTANT SIZE    =      7    ----
+   XDATA SIZE       =    345     167
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

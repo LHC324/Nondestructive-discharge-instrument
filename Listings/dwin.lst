@@ -1,0 +1,561 @@
+C51 COMPILER V9.60.0.0   DWIN                                                              08/03/2022 21:14:09 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE DWIN
+OBJECT MODULE PLACED IN .\Objects\dwin.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE Src\dwin.c LARGE OPTIMIZE(9,SPEED) BROWSE INCDIR(.\Inc;.\SmallRTOS\Inc) 
+                    -DEBUG OBJECTEXTEND PRINT(.\Listings\dwin.lst) OBJECT(.\Objects\dwin.obj)
+
+line level    source
+
+   1          /*
+   2           * Dwin.c
+   3           *
+   4           *  Created on: 2022年1月4日
+   5           *      Author: play
+   6           */
+   7          
+   8          #include "Dwin.h"
+   9          #include "usart.h"
+  10          #include "discharger.h"
+  11          #include "eeprom.h"
+  12          
+  13          // Dwin_T g_Dwin;
+  14          
+  15          static uint8_t dtx_buf[128];
+  16          static uint16_t user_name = 0x0000, user_code = 0x0000, error = 0x0000;
+  17          
+  18          static void Dwin_SetDisMode(pDwinHandle pd, uint8_t Site);
+  19          // static void Dwin_SetCurrentFlag(pDwinHandle pd, uint8_t Site);
+  20          // static void Dwin_SetPowerFlag(pDwinHandle pd, uint8_t Site);
+  21          static void Dwin_SetSlaveId(pDwinHandle pd, uint8_t Site);
+  22          static void Dwin_SetDisTargetTimes(pDwinHandle pd, uint8_t Site);
+  23          static void Dwin_SetDisVcutoff(pDwinHandle pd, uint8_t Site);
+  24          static void Dwin_SetDisVreboot(pDwinHandle pd, uint8_t Site);
+  25          static void Dwin_SetDisILimit(pDwinHandle pd, uint8_t Site);
+  26          static void Dwin_SetDisPLimit(pDwinHandle pd, uint8_t Site);
+  27          static void Dwin_LoginSure(pDwinHandle pd, uint8_t Site);
+  28          static void Dwin_SaveSure(pDwinHandle pd, uint8_t Site);
+  29          
+  30          /*迪文响应线程*/
+  31          static DwinMap Dwin_ObjMap[] = {
+  32                  {SLAVE_ID_ADDR, 32, 1, Dwin_SetSlaveId},
+  33                  {TARGET_DISTIMES_ADDR, 600, 120, Dwin_SetDisTargetTimes},
+  34                  {V_DISCUTOFF_ADDR, 600, 220, Dwin_SetDisVcutoff},
+  35                  {V_DISREBOOT_ADDR, 600, 220, Dwin_SetDisVreboot},
+  36                  {I_MAX_ADDR, 35, 1, Dwin_SetDisILimit},
+  37                  {P_MAX_ADDR, 950, 15, Dwin_SetDisPLimit},
+  38                  {MODE1_ADDR, 1, 0, Dwin_SetDisMode},
+  39                  {MODE2_ADDR, 1, 0, Dwin_SetDisMode},
+  40                  {USER_NAME_ADDR, 9999, 0, Dwin_LoginSure},
+  41                  {USER_CODE_ADDR, 9999, 0, Dwin_LoginSure},
+  42                  {LOGIN_SURE_ADDR, 0xFFFF, 0, Dwin_LoginSure},
+  43                  {LOGIN_CANCEL_ADDR, 0xFFFF, 0, Dwin_LoginSure},
+  44                  {PARAM_SAVE_ADDR, 0xFFFF, 0, Dwin_SaveSure},
+  45          };
+  46          
+  47          DwinHandle Dwin_Object = {
+  48                  DEFAULT_SYSTEM_ADDR,
+  49                  {dtx_buf, 0},
+  50                  {
+  51                          NULL,
+  52                          0,
+  53                          &discharger.Storage,
+  54                          Dwin_ObjMap,
+C51 COMPILER V9.60.0.0   DWIN                                                              08/03/2022 21:14:09 PAGE 2   
+
+  55                          sizeof(Dwin_ObjMap) / sizeof(DwinMap),
+  56                  },
+  57                  &Uart4,
+  58          };
+  59          
+  60          /*以下代码9级优化，速度优先*/
+  61          #pragma OPTIMIZE(9, speed)
+  62          
+  63          /**
+  64           * @brief  对迪文屏幕发送数据帧
+  65           * @param  pd 迪文屏幕对象
+  66           * @retval None
+  67           */
+  68          void Dwin_Send(pDwinHandle pd)
+  69          {
+  70   1      #if defined(USING_CRC)
+  71   1              uint16_t crc = 0;
+  72   1              if (pd && pd->Uart)
+  73   1              {
+  74   2                      /*The first three bytes do not participate in verification*/
+  75   2                      crc = Get_Crc16(&pd->Master.pTbuf[3U], pd->Master.TxCount - 3U, 0xFFFF);
+  76   2                      pd->Master.pTbuf[pd->Master.TxCount++] = crc;
+  77   2                      pd->Master.pTbuf[pd->Master.TxCount++] = (uint8_t)(crc >> 8U);
+  78   2              }
+  79   1      #endif
+  80   1              Uartx_SendStr(pd->Uart, pd->Master.pTbuf, pd->Master.TxCount, UART_BYTE_SENDOVERTIME);
+  81   1      }
+  82          
+  83          /**
+  84           * @brief  写数据变量到指定地址并显示
+  85           * @param  pd 迪文屏幕对象句柄
+  86           * @param  addr 开始地址
+  87           * @param  dat 指向数据的指针
+  88           * @param  len 数据长度
+  89           * @retval None
+  90           */
+  91          void Dwin_Write(pDwinHandle pd, uint16_t addr, uint8_t *dat, uint16_t len)
+  92          {
+  93   1      #if defined(USING_CRC)
+  94   1              uint8_t temp_data[] = {0x5A, 0xA5, 0, WRITE_CMD, 0, 0};
+  95   1      #else
+                      uint8_t temp_data[] = {0x5A, 0xA5, 0, WRITE_CMD, 0, 0};
+              #endif
+  98   1              if (pd)
+  99   1              {
+ 100   2      #if defined(USING_CRC)
+ 101   2                      temp_data[2] = len + 5U;
+ 102   2      #else
+                              temp_data[2] = len + 3U;
+              #endif
+ 105   2                      temp_data[4] = addr >> 8U, temp_data[5] = addr;
+ 106   2                      pd->Master.TxCount = sizeof(temp_data);
+ 107   2                      memcpy(pd->Master.pTbuf, temp_data, sizeof(temp_data));
+ 108   2                      memcpy(&pd->Master.pTbuf[pd->Master.TxCount], dat, len);
+ 109   2                      pd->Master.TxCount += len;
+ 110   2      
+ 111   2                      Dwin_Send(pd);
+ 112   2              }
+ 113   1      }
+ 114          
+ 115          /**
+ 116           * @brief  读出指定地址指定长度数据
+C51 COMPILER V9.60.0.0   DWIN                                                              08/03/2022 21:14:09 PAGE 3   
+
+ 117           * @param  pd 迪文屏幕对象句柄
+ 118           * @param  addr 开始地址
+ 119           * @param  words 地址数目
+ 120           * @retval None
+ 121           */
+ 122          void Dwin_Read(pDwinHandle pd, uint16_t addr, uint8_t words)
+ 123          {
+ 124   1      #if defined(USING_CRC)
+ 125   1              uint8_t temp_data[] = {0x5A, 0xA5, 6U, WRITE_CMD, 0, 0, 0};
+ 126   1      #else
+                      uint8_t temp_data[] = {0x5A, 0xA5, 0x04, WRITE_CMD, 0, 0, 0};
+              #endif
+ 129   1      
+ 130   1              if (pd)
+ 131   1              {
+ 132   2                      temp_data[4] = addr >> 8U, temp_data[5] = addr, temp_data[6] = words;
+ 133   2                      pd->Master.TxCount = sizeof(temp_data);
+ 134   2                      memcpy(pd->Master.pTbuf, temp_data, sizeof(temp_data));
+ 135   2      
+ 136   2                      Dwin_Send(pd);
+ 137   2              }
+ 138   1      }
+ 139          
+ 140          /**
+ 141           * @brief  迪文屏幕指定页面切换
+ 142           * @param  pd 迪文屏幕对象句柄
+ 143           * @param  page 目标页面
+ 144           * @retval None
+ 145           */
+ 146          void Dwin_PageChange(pDwinHandle pd, uint16_t page)
+ 147          {
+ 148   1      #if (USING_CRC)
+ 149   1              uint8_t buf[] = {
+ 150   1                      0x5A, 0xA5, 0x07 + 2U, WRITE_CMD, 0x00, 0x84, 0x5A, 0x01, 0, 0};
+ 151   1      #else
+                      uint8_t buf[] = {
+                              0x5A, 0xA5, 0x07, WRITE_CMD, 0x00, 0x84, 0x5A, 0x01, 0, 0};
+              #endif
+ 155   1              if (pd)
+ 156   1              {
+ 157   2                      buf[8] = page >> 8U, buf[9] = page;
+ 158   2                      pd->Master.TxCount = 0U;
+ 159   2                      memcpy(pd->Master.pTbuf, buf, sizeof(buf));
+ 160   2                      pd->Master.TxCount += sizeof(buf);
+ 161   2      
+ 162   2                      Dwin_Send(pd);
+ 163   2              }
+ 164   1      }
+ 165          
+ 166          /*83指令返回数据以一个字为基础*/
+ 167          #define DW_WORD 1U
+ 168          #define DW_DWORD 2U
+ 169          /*获取迪文屏幕数据*/
+ 170          #define Get_Data(__ptr, __s, __size)                                 \
+ 171                  ((__size) < 2U ? ((uint16_t)((__ptr)->Slave.pRbuf[__s] << 8U) |  \
+ 172                                                    ((__ptr)->Slave.pRbuf[__s + 1U]))              \
+ 173                                             : ((uint32_t)((__ptr)->Slave.pRbuf[__s] << 24U) | \
+ 174                                                    ((__ptr)->Slave.pRbuf[__s + 1U] << 16U) |      \
+ 175                                                    ((__ptr)->Slave.pRbuf[__s + 2U] << 8U) | ((__ptr)->Slave.pRbuf[__s + 3U])))
+ 176          
+ 177          /**
+ 178           * @brief  迪文屏幕接收数据解析
+C51 COMPILER V9.60.0.0   DWIN                                                              08/03/2022 21:14:09 PAGE 4   
+
+ 179           * @param  pd 迪文屏幕对象句柄
+ 180           * @retval None
+ 181           */
+ 182          void Dwin_Poll(pDwinHandle pd)
+ 183          { /*检查帧头是否符合要求*/
+ 184   1              if ((pd->Slave.pRbuf[0] == 0x5A) && (pd->Slave.pRbuf[1] == 0xA5))
+ 185   1              {
+ 186   2                      uint16_t addr = Get_Data(pd, 4U, DW_WORD), crc16 = 0;
+ 187   2                      uint8_t i = 0;
+ 188   2      #if defined(USING_DEBUG)
+                              // shellPrint(Shell_Object, "addr = 0x%x\r\n", addr);
+              #endif
+ 191   2                      /*检查CRC是否正确*/
+ 192   2                      crc16 = Get_Crc16(&pd->Slave.pRbuf[3U], pd->Slave.RxCount - 5U, 0xFFFF);
+ 193   2                      crc16 = (crc16 >> 8U) | (crc16 << 8U);
+ 194   2                      if (crc16 == Get_Data(pd, pd->Slave.RxCount - 2U, DW_WORD))
+ 195   2                      {
+ 196   3                              for (; i < pd->Slave.Events_Size; i++)
+ 197   3                              {
+ 198   4                                      if (pd->Slave.pMap[i].addr == addr)
+ 199   4                                      {
+ 200   5                                              if (pd->Slave.pMap[i].event)
+ 201   5                                                      pd->Slave.pMap[i].event(pd, i);
+ 202   5                                              break;
+ 203   5                                      }
+ 204   4                              }
+ 205   3                      }
+ 206   2              }
+ 207   1      #if defined(USING_DEBUG)
+                      for (uint16_t i = 0; i < pd->Slave.RxCount; i++)
+                      // shellPrint(Shell_Object, "pRbuf[%d] = 0x%x\r\n", i, pd->Slave.pRbuf[i]);
+              #endif
+ 211   1                      memset(pd->Slave.pRbuf, 0x00, pd->Slave.RxCount);
+ 212   1              pd->Slave.RxCount = 0U;
+ 213   1      }
+ 214          
+ 215          /**
+ 216           * @brief  迪文屏幕数据保存到EEPROM/Modbus协议栈
+ 217           * @param  pd 迪文屏幕对象句柄
+ 218           * @retval None
+ 219           */
+ 220          void Dwin_Save(pDwinHandle pd)
+ 221          {
+ 222   1              Storage_TypeDef *ps = (Storage_TypeDef *)pd->Slave.pHandle;
+ 223   1              if (pd && ps)
+ 224   1              {
+ 225   2                      /*计算crc校验码*/
+ 226   2                      ps->Crc = Get_Crc16((uint8_t *)ps, sizeof(Storage_TypeDef) - sizeof(ps->Crc), 0xFFFF);
+ 227   2                      /*参数保存到Flash*/
+ 228   2                      IapWrites(pd->Save_Addr, (const uint8_t *)ps, sizeof(Storage_TypeDef));
+ 229   2              }
+ 230   1      }
+ 231          
+ 232          /**
+ 233           * @brief  迪文屏幕切换到极限电流/极限功率放电模式
+ 234           * @param  pd 迪文屏幕对象句柄
+ 235           * @param  Site 记录当前Map中位置
+ 236           * @retval None
+ 237           */
+ 238          static void Dwin_SetDisMode(pDwinHandle pd, uint8_t Site)
+ 239          {
+ 240   1      #define CURRENT_PAGE 6U
+C51 COMPILER V9.60.0.0   DWIN                                                              08/03/2022 21:14:09 PAGE 5   
+
+ 241   1      #define POWER_PAGE 7U
+ 242   1              Storage_TypeDef *ps = (Storage_TypeDef *)pd->Slave.pHandle;
+ 243   1              Site = Site;
+ 244   1      
+ 245   1              if (pd && ps)
+ 246   1              {
+ 247   2                      uint8_t dat = (uint8_t)Get_Data(pd, 7U, pd->Slave.pRbuf[6U]);
+ 248   2                      uint8_t page = 0;
+ 249   2                      if (dat == RSURE_CODE)
+ 250   2                      {
+ 251   3                              __SET_FLAG(ps->flag, I_Limit_Enable);
+ 252   3                              __RESET_FLAG(ps->flag, P_Limit_Enable);
+ 253   3                              page = CURRENT_PAGE;
+ 254   3                      }
+ 255   2                      else
+ 256   2                      {
+ 257   3                              __SET_FLAG(ps->flag, P_Limit_Enable);
+ 258   3                              __RESET_FLAG(ps->flag, I_Limit_Enable);
+ 259   3                              page = POWER_PAGE;
+ 260   3                      }
+ 261   2                      // Dwin_Save(pd);
+ 262   2                      Dwin_PageChange(pd, page);
+ 263   2              }
+ 264   1      }
+ 265          
+ 266          /**
+ 267           * @brief  迪文屏幕设置放电仪放电参数
+ 268           * @param  pd 迪文屏幕对象句柄
+ 269           * @param  site 记录当前Map中位置
+ 270           * @retval None
+ 271           */
+ 272          #define __Dwin_SetValue(__pd, __site, __type, __value)                                                    
+             -      \
+ 273                  do                                                                                                       
+             -   \
+ 274                  {                                                                                                        
+             -   \
+ 275                          if (__pd)                                                                                               
+             -\
+ 276                          {                                                                                                       
+             -\
+ 277                                  __type dat = (__type)Get_Data(__pd, 7U, pd->Slave.pRbuf[6U]);                                       \
+ 278                                  if ((dat >= (__type)pd->Slave.pMap[__site].lower) && (dat <= (__type)pd->Slave.pMap[__site].upper)) \
+ 279                                  {                                                                                                   \
+ 280                                          if (__site < __pd->Slave.Events_Size)                                                           \
+ 281                                          {                                                                                               \
+ 282                                                  (__value) = dat;                                                                            \
+ 283                                          }                                                                                               \
+ 284                                  }                                                                                                   \
+ 285                                  else                                                                                                \
+ 286                                          (__value) = (__type)pd->Slave.pMap[__site].lower;                                               \
+ 287                                  Dwin_Write(pd, pd->Slave.pMap[__site].addr, (uint8_t *)&(__value), sizeof((__value)));              \
+ 288                          }                                                                                                       
+             -\
+ 289                  } while (false)
+ 290          
+ 291          /**
+ 292           * @brief  迪文屏幕设置放电仪从站id
+ 293           * @param  pd 迪文屏幕对象句柄
+ 294           * @param  Site 记录当前Map中位置
+ 295           * @retval None
+ 296           */
+C51 COMPILER V9.60.0.0   DWIN                                                              08/03/2022 21:14:09 PAGE 6   
+
+ 297          static void Dwin_SetSlaveId(pDwinHandle pd, uint8_t Site)
+ 298          {
+ 299   1              Storage_TypeDef *ps = (Storage_TypeDef *)pd->Slave.pHandle;
+ 300   1              if (ps)
+ 301   1                      __Dwin_SetValue(pd, Site, uint16_t, ps->Slave_Id);
+ 302   1      }
+ 303          
+ 304          /**
+ 305           * @brief  迪文屏幕设置放电时长
+ 306           * @param  pd 迪文屏幕对象句柄
+ 307           * @param  Site 记录当前Map中位置
+ 308           * @retval None
+ 309           */
+ 310          static void Dwin_SetDisTargetTimes(pDwinHandle pd, uint8_t Site)
+ 311          {
+ 312   1              Storage_TypeDef *ps = (Storage_TypeDef *)pd->Slave.pHandle;
+ 313   1              if (ps)
+ 314   1                      __Dwin_SetValue(pd, Site, uint16_t, ps->Target_Timers);
+ 315   1      }
+ 316          
+ 317          /**
+ 318           * @brief  迪文屏幕设置放电截止电压
+ 319           * @param  pd 迪文屏幕对象句柄
+ 320           * @param  Site 记录当前Map中位置
+ 321           * @retval None
+ 322           */
+ 323          static void Dwin_SetDisVcutoff(pDwinHandle pd, uint8_t Site)
+ 324          {
+ 325   1              Storage_TypeDef *ps = (Storage_TypeDef *)pd->Slave.pHandle;
+ 326   1              if (ps)
+ 327   1                      __Dwin_SetValue(pd, Site, uint16_t, ps->V_CuttOff);
+ 328   1      }
+ 329          
+ 330          /**
+ 331           * @brief  迪文屏幕设置二次放电起放电压
+ 332           * @param  pd 迪文屏幕对象句柄
+ 333           * @param  Site 记录当前Map中位置
+ 334           * @retval None
+ 335           */
+ 336          static void Dwin_SetDisVreboot(pDwinHandle pd, uint8_t Site)
+ 337          {
+ 338   1              Storage_TypeDef *ps = (Storage_TypeDef *)pd->Slave.pHandle;
+ 339   1              if (ps)
+ 340   1                      __Dwin_SetValue(pd, Site, uint16_t, ps->V_Reboot);
+ 341   1      }
+ 342          
+ 343          /**
+ 344           * @brief  迪文屏幕设置极限放电电流
+ 345           * @param  pd 迪文屏幕对象句柄
+ 346           * @param  Site 记录当前Map中位置
+ 347           * @retval None
+ 348           */
+ 349          static void Dwin_SetDisILimit(pDwinHandle pd, uint8_t Site)
+ 350          {
+ 351   1              Storage_TypeDef *ps = (Storage_TypeDef *)pd->Slave.pHandle;
+ 352   1              if (ps)
+ 353   1                      __Dwin_SetValue(pd, Site, uint8_t, ps->I_Limit);
+ 354   1      }
+ 355          
+ 356          /**
+ 357           * @brief  迪文屏幕设置极限放电功率
+ 358           * @param  pd 迪文屏幕对象句柄
+C51 COMPILER V9.60.0.0   DWIN                                                              08/03/2022 21:14:09 PAGE 7   
+
+ 359           * @param  Site 记录当前Map中位置
+ 360           * @retval None
+ 361           */
+ 362          static void Dwin_SetDisPLimit(pDwinHandle pd, uint8_t Site)
+ 363          {
+ 364   1              Storage_TypeDef *ps = (Storage_TypeDef *)pd->Slave.pHandle;
+ 365   1              if (ps)
+ 366   1                      __Dwin_SetValue(pd, Site, uint16_t, ps->P_Limit);
+ 367   1      }
+ 368          
+ 369          #define __Clear_UserInfo(__pd)                                                        \
+ 370                  do                                                                                \
+ 371                  {                                                                                 \
+ 372                          uint32_t temp_value = 0;                                                      \
+ 373                          user_name = user_code = 0x0000;                                               \
+ 374                          Dwin_Write(__pd, USER_NAME_ADDR, (uint8_t *)&temp_value, sizeof(temp_value)); \
+ 375                  } while (false)
+ 376          
+ 377          /**
+ 378           * @brief  迪文屏幕用户登录确认
+ 379           * @param  pd 迪文屏幕对象句柄
+ 380           * @param  Site 记录当前Map中位置
+ 381           * @retval None
+ 382           */
+ 383          static void Dwin_LoginSure(pDwinHandle pd, uint8_t Site)
+ 384          {
+ 385   1      #define USER_NAMES 1001
+ 386   1      #define USER_PASSWORD 6666
+ 387   1      #define SETTNG_PAGE 0x06
+ 388   1      
+ 389   1              Storage_TypeDef *ps = (Storage_TypeDef *)pd->Slave.pHandle;
+ 390   1              uint16_t dat = Get_Data(pd, 7U, pd->Slave.pRbuf[6U]);
+ 391   1              uint16_t addr = pd->Slave.pMap[Site].addr;
+ 392   1              uint16_t page = 0;
+ 393   1              uint16_t default_name = ps->User_Name, defalut_code = ps->User_Code;
+ 394   1              // uint32_t temp_value = 0;
+ 395   1      
+ 396   1              if ((dat >= pd->Slave.pMap[Site].lower) && (dat <= pd->Slave.pMap[Site].upper))
+ 397   1              {
+ 398   2                      addr == USER_NAME_ADDR ? user_name = dat : (addr == USER_CODE_ADDR ? user_code = dat : 0U);
+ 399   2                      if ((addr == LOGIN_SURE_ADDR) && (dat == RSURE_CODE))
+ 400   2                      { /*密码用户名正确*/
+ 401   3                              if ((user_name == default_name) && (user_code == defalut_code))
+ 402   3                              { /*清除错误信息*/
+ 403   4                                      error = 0x0000;
+ 404   4                                      page = __GET_FLAG(ps->flag, I_Limit_Enable) ? CURRENT_PAGE : POWER_PAGE;
+ 405   4                                      Dwin_PageChange(pd, page);
+ 406   4      
+ 407   4                                      /*上报后台参数*/
+ 408   4                                      Dwin_Write(pd, SLAVE_ID_ADDR, (uint8_t *)ps,
+ 409   4                                                         GET_PARAM_SITE(Storage_TypeDef, flag, uint8_t));
+ 410   4      
+ 411   4      #if defined(USING_DEBUG)
+                                              Uartx_Printf(&Uart1, "success: The password is correct!\r\n");
+              #endif
+ 414   4                              }
+ 415   3                              else
+ 416   3                              {
+ 417   4                                      /*用户名、密码错误*/
+ 418   4                                      if ((user_name != default_name) && (user_code != defalut_code))
+ 419   4                                      {
+ 420   5                                              error = 0x0003;
+C51 COMPILER V9.60.0.0   DWIN                                                              08/03/2022 21:14:09 PAGE 8   
+
+ 421   5      #if defined(USING_DEBUG)
+                                                      Uartx_Printf(&Uart1, "error: Wrong user name and password!\r\n");
+              #endif
+ 424   5                                      }
+ 425   4                                      /*用户名错误*/
+ 426   4                                      else if (user_name != default_name)
+ 427   4                                      {
+ 428   5                                              error = 0x0001;
+ 429   5      #if defined(USING_DEBUG)
+                                                      Uartx_Printf(&Uart1, "error: User name error!\r\n");
+              #endif
+ 432   5                                      }
+ 433   4                                      /*密码错误*/
+ 434   4                                      else
+ 435   4                                      {
+ 436   5                                              error = 0x0002;
+ 437   5      
+ 438   5      #if defined(USING_DEBUG)
+                                                      Uartx_Printf(&Uart1, "error: User password error!\r\n");
+              #endif
+ 441   5                                      }
+ 442   4                              }
+ 443   3                      }
+ 444   2                      if ((addr == LOGIN_CANCEL_ADDR) && (dat == RCANCEL_CODE))
+ 445   2                      {
+ 446   3                              error = 0x0000;
+ 447   3                              // user_name = user_code = 0x0000;
+ 448   3                              // Dwin_Write(pd, USER_NAME_ADDR, (uint8_t *)&temp_value, sizeof(temp_value));
+ 449   3                              __Clear_UserInfo(pd);
+ 450   3      #if defined(USING_DEBUG)
+                                      Uartx_Printf(&Uart1, "success: Clear Error Icon!\r\n");
+              #endif
+ 453   3                      }
+ 454   2                      Dwin_Write(pd, INPUT_ERROR_ADDR, (uint8_t *)&error, sizeof(error));
+ 455   2              }
+ 456   1      }
+ 457          
+ 458          /**
+ 459           * @brief  迪文屏幕参数保存确认
+ 460           * @param  pd 迪文屏幕对象句柄
+ 461           * @param  Site 记录当前Map中位置
+ 462           * @retval None
+ 463           */
+ 464          static void Dwin_SaveSure(pDwinHandle pd, uint8_t Site)
+ 465          {
+ 466   1      #define MAIN_PAGE 2U
+ 467   1              Storage_TypeDef *ps = (Storage_TypeDef *)pd->Slave.pHandle;
+ 468   1              Site = Site;
+ 469   1      
+ 470   1              if (pd && ps)
+ 471   1              {
+ 472   2                      uint8_t dat = (uint8_t)Get_Data(pd, 7U, pd->Slave.pRbuf[6U]);
+ 473   2                      if (dat == RSURE_CODE)
+ 474   2                      {
+ 475   3                              __SET_FLAG(ps->flag, Save_Flag);
+ 476   3                              /*清除用户登录信息*/
+ 477   3                              // user_name = user_code = 0;
+ 478   3                              __Clear_UserInfo(pd);
+ 479   3                              Dwin_Save(pd);
+ 480   3                              Dwin_PageChange(pd, MAIN_PAGE);
+ 481   3                      }
+ 482   2              }
+C51 COMPILER V9.60.0.0   DWIN                                                              08/03/2022 21:14:09 PAGE 9   
+
+ 483   1      }
+ 484          
+ 485          /**
+ 486           * @brief  取得16bitCRC校验码
+ 487           * @param  ptr   当前数据串指针
+ 488           * @param  length  数据长度
+ 489           * @param  init_dat 校验所用的初始数据
+ 490           * @retval 16bit校验码
+ 491           */
+ 492          uint16_t Get_Crc16(uint8_t *ptr, uint16_t length, uint16_t init_dat)
+ 493          {
+ 494   1              uint16_t i = 0;
+ 495   1              uint16_t j = 0;
+ 496   1              uint16_t crc16 = init_dat;
+ 497   1      
+ 498   1              for (i = 0; i < length; i++)
+ 499   1              {
+ 500   2                      crc16 ^= *ptr++;
+ 501   2      
+ 502   2                      for (j = 0; j < 8; j++)
+ 503   2                      {
+ 504   3                              if (crc16 & 0x0001)
+ 505   3                              {
+ 506   4                                      crc16 = (crc16 >> 1) ^ 0xa001;
+ 507   4                              }
+ 508   3                              else
+ 509   3                              {
+ 510   4                                      crc16 = crc16 >> 1;
+ 511   4                              }
+ 512   3                      }
+ 513   2              }
+ 514   1              return (crc16);
+ 515   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   4748    ----
+   CONSTANT SIZE    =     23    ----
+   XDATA SIZE       =    300     167
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

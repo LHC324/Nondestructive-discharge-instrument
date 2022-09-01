@@ -1,0 +1,11 @@
+".\Objects\STARTUP.obj",
+".\Objects\dwin.obj",
+".\Objects\gpio.obj",
+".\Objects\main.obj",
+".\Objects\timer.obj",
+".\Objects\usart.obj",
+".\Objects\eeprom.obj",
+".\Objects\discharger.obj",
+".\Objects\Modbus.obj" 
+TO ".\Objects\Discharge Meter" 
+PRINT(".\Listings\Discharge Meter.m51") RAMSIZE(256) 

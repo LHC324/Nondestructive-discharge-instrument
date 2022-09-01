@@ -1,0 +1,29 @@
+{
+    "files.associations": {
+        "iic.C": "cpp",
+        "gpio.h": "c",
+        "charger.h": "c",
+        "config.h": "c",
+        "OS_CPU_C.C": "cpp",
+        "OS_CONFIG.H": "cpp",
+        "usart.h": "c",
+        "timer.h": "c",
+        "wifi.h": "c",
+        "OS_CORE.C": "cpp",
+        "OS_Q.C": "cpp",
+        "OS_SEM.C": "cpp",
+        "OS_CFG.H": "cpp",
+        "OS_CPU.H": "cpp",
+        "OS.H": "cpp",
+        "STC8.H": "cpp",
+        "eeprom.h": "c",
+        "systemtimer.h": "c",
+        "discharger.h": "c",
+        "math.h": "c",
+        "MATH.H": "cpp",
+        "dwin.h": "c",
+        "stddef.h": "c",
+        "STDDEF.H": "cpp",
+        "modbus.h": "c"
+    }
+}

@@ -1,0 +1,534 @@
+C51 COMPILER V9.60.0.0   MAIN                                                              08/03/2022 21:25:24 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE MAIN
+OBJECT MODULE PLACED IN .\Objects\main.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE Src\main.c LARGE OPTIMIZE(9,SPEED) BROWSE INCDIR(.\Inc;.\SmallRTOS\Inc) 
+                    -DEBUG OBJECTEXTEND PRINT(.\Listings\main.lst) OBJECT(.\Objects\main.obj)
+
+line level    source
+
+   1          #include "OS_CONFIG.h"
+   2          #include "GPIO.h"
+   3          #include "timer.h"
+   4          #include "usart.h"
+   5          // #include "charger.h"
+   6          #include "discharger.h"
+   7          #include "Dwin.h"
+   8          #include "wifi.h"
+   9          #include "eeprom.h"
+  10          #include "Modbus.h"
+  11          
+  12          #if (DEBUGGING == 1)
+              void HardDefault(uint8_t channel, uint8_t error);
+              #endif
+  15          
+  16          #if !defined(USING_RTOS)
+  17          // void Event_Init(TIMERS *ptimer);
+  18          // static void Event_Polling(void);
+  19          static void Event_Polling(TIMERS *ptimer);
+  20          static void Debug_Task(void);
+  21          static void Uartx_Parser(void);
+  22          static void Master_Task(void);
+  23          static void DisTimer_Task(void);
+  24          static void Report_Task(void);
+  25          
+  26          /*禁止编译器优化该模块*/
+  27          #pragma OPTIMIZE(0)
+  28          
+  29          TIMERS Timer_Group[] = {
+  30          #if (DEBUGGING == 1)
+                  {0, 100, true, false, Debug_Task}, /*调试接口（3s）*/
+              #else
+  33              {0, 10, true, false, Uartx_Parser},    /*通用串口数据接收解析器(10ms)*/
+  34              {0, 1000, true, false, Report_Task},   /*上报放电仪数据到迪文屏幕（1.0s）*/
+  35              {0, 500, true, false, Master_Task},    /*主动请求放电仪数据（0.5S）*/
+  36              {0, 1000, true, false, DisTimer_Task}, /*放电数据统计（0.5S）*/
+  37          
+  38          #endif
+  39          };
+  40          /*获得当前软件定时器个数*/
+  41          const uint8_t g_TimerNumbers = sizeof(Timer_Group) / sizeof(TIMERS);
+  42          #endif
+  43          
+  44          void main(void)
+  45          {
+  46   1          uint16_t Crc = 0;
+  47   1          Storage_TypeDef *ps = &discharger.Storage;
+  48   1          // pModbusHandle pm = &Modbus_Object;
+  49   1          Storage_TypeDef dis_storage = {0x01, 120, 220, 220, 1, 15, 0x02, 1001, 6666, 0xB59C};
+  50   1      
+  51   1          /*设置WiFi芯片复引脚：不复位会导致连接不上云平台*/
+  52   1          // WIFI_RESET = 0;
+  53   1          // Delay_Ms(200);
+  54   1          // WIFI_RESET = 1;
+C51 COMPILER V9.60.0.0   MAIN                                                              08/03/2022 21:25:24 PAGE 2   
+
+  55   1          // WIFI_RELOAD = 1;
+  56   1          /*初始化引脚*/
+  57   1          Gpio_Init();
+  58   1          /*定时器0初始化*/
+  59   1          Timer0_Init();
+  60   1      #if !defined(USING_SIMULATE)
+                  /*串口1初始化*/
+                  Uart1_Init(BRT_1T(BAUD_115200)); // Wifi
+              #endif
+  64   1          /*串口2初始化*/
+  65   1          Uart2_Init(BRT_1T(BAUD_115200)); // 4G
+  66   1          Uart3_Init(BRT_1T(BAUD_9600));   // RS485
+  67   1          Uart4_Init(BRT_1T(BAUD_115200)); // Dwin
+  68   1          /*WiFi初始化*/
+  69   1          //  Wifi_Init();
+  70   1          /*读出默认放电参数*/
+  71   1          Iap_Reads(DEFAULT_SYSTEM_ADDR, (uint8_t *)ps, sizeof(Storage_TypeDef));
+  72   1          Crc = Get_Crc16((uint8_t *)ps, sizeof(Storage_TypeDef) - sizeof(ps->Crc), 0xFFFF);
+  73   1          if (ps->Crc != Crc)
+  74   1          {
+  75   2              // Uartx_Printf(&Uart2, "Initialization parameters:ps->Crc[%#X], Crc[%#X].\r\n");
+  76   2              memcpy(ps, &dis_storage, sizeof(discharger.Storage));
+  77   2              ps->Crc = Get_Crc16((uint8_t *)&dis_storage, sizeof(Storage_TypeDef) - sizeof(dis_storage.Crc), 0x
+             -FFFF);
+  78   2              IapWrites(DEFAULT_SYSTEM_ADDR, (uint8_t *)ps, sizeof(Storage_TypeDef));
+  79   2          }
+  80   1      
+  81   1          //     /*数据写回保持寄存器*/
+  82   1          //     pm->Slave.Reg_Type = HoldRegister;
+  83   1          //     pm->Slave.Operate = Write;
+  84   1          //     /*读取对应寄存器*/
+  85   1          //     if (!Modbus_Operatex(pm, 0x00, (uint8_t *)ps, sizeof(Storage_TypeDef)))
+  86   1          //     {
+  87   1          // #if defined(USING_DEBUG)
+  88   1          //         Debug("Coil reading failed!\r\n");
+  89   1          //         return;
+  90   1          // #endif
+  91   1          //     }
+  92   1      
+  93   1      #if !defined(USING_RTOS)
+  94   1          /*开总中断*/
+  95   1          OPEN_GLOBAL_OUTAGE();
+  96   1      #else
+                  OSStart(); //启动操作系统
+              #endif
+  99   1          // /*上报后台参数*/
+ 100   1          // Dwin_Write(&Dwin_Objct, SLAVE_ID_ADDR, (uint8_t *)&(discharger.Storage),
+ 101   1          //            GET_PARAM_SITE(Storage_TypeDef, flag, uint8_t));
+ 102   1      
+ 103   1          while (1)
+ 104   1          {
+ 105   2      #if !defined(USING_RTOS)
+ 106   2              ET0 = 0;
+ 107   2              Event_Polling(Timer_Group);
+ 108   2              ET0 = 1;
+ 109   2      #endif
+ 110   2              /*喂硬件看门狗*/
+ 111   2              IWDG_PIN ^= true;
+ 112   2          }
+ 113   1      }
+ 114          
+ 115          #if defined(USING_RTOS)
+C51 COMPILER V9.60.0.0   MAIN                                                              08/03/2022 21:25:24 PAGE 3   
+
+              void TaskA(void)
+              {
+                  // for (;;)
+                  while (1)
+                  {
+                      OSWait(K_TMO, 100); // K_SIG
+                      // Uartx_Printf(&Uart1, "Hello world.\r\n");
+                      // Uartx_Printf(&Uart2, "Hello world.\r\n");
+                      // Uartx_Printf(&Uart3, "Hello world.\r\n");
+                      // Uartx_Printf(&Uart4, "Hello world.\r\n");
+                      IWDG_PIN ^= 1;
+                  }
+              }
+              
+              #else
+ 131          /**
+ 132           * @brief       任务组时间片调度
+ 133           * @details     按照指定时间片和执行标志调度任务
+ 134           * @param       None
+ 135           * @retval      None
+ 136           */
+ 137          /*变量出现问题，加static*/
+ 138          // #pragma disable
+ 139          void Event_Polling(TIMERS *ptimer)
+ 140          {
+ 141   1          TIMERS *p = ptimer;
+ 142   1          if (ptimer)
+ 143   1          {
+ 144   2              for (; p < ptimer + g_TimerNumbers; p++)
+ 145   2              {
+ 146   3                  if (p->execute_flag == true)
+ 147   3                  {
+ 148   4                      p->ehandle();
+ 149   4                      p->execute_flag = false;
+ 150   4                  }
+ 151   3              }
+ 152   2          }
+ 153   1      }
+ 154          
+ 155          #if (DEBUGGING == 1)
+              /**
+               * @brief       调试任务
+               * @details     调试阶段输出调试信息
+               * @param       None
+               * @retval      None
+               */
+              void Debug_Task(void)
+              {
+                  data uint8_t c = 0;
+              
+                  for (c = 0; c < CHANNEL_MAX; c++)
+                  {
+                      Uartx_Printf(&Uart1, "channel %bd :STATU is 0x%x\r\n", c, (uint8_t)g_Sc8913_Registers[c][STATUS_AD
+             -DR]);
+                      Uartx_Printf(&Uart1, "channel %bd :VBUS is %f\r\n", c, READ_VBUS_VALUE(c, VBUS_FB_VALUE_ADDR));
+                      Uartx_Printf(&Uart1, "channel %bd :VBAT is %f\r\n", c, READ_VBAT_VALUE(c, VBAT_FB_VALUE_ADDR));
+                      Uartx_Printf(&Uart1, "channel %bd :IBUS is %f\r\n", c, READ_IBUS_VALUE(c, IBUS_VALUE_ADDR));
+                      Uartx_Printf(&Uart1, "channel %bd :IBAT is %f\r\n", c, READ_IBAT_VALUE(c, IBAT_VALUE_ADDR));
+                  }
+              }
+              #endif
+ 176          
+C51 COMPILER V9.60.0.0   MAIN                                                              08/03/2022 21:25:24 PAGE 4   
+
+ 177          #define CLEAR_UARTX_BUFFER(Uart)                        \
+ 178              do                                                  \
+ 179              {                                                   \
+ 180                  memset(Uart->Rx.pbuf, 0x00, Uart->Rx.rx_count); \
+ 181                  Uart->Rx.rx_count = 0;                          \
+ 182              } while (false)
+ 183          
+ 184          // void Delay20ms() //@27.000MHz
+ 185          // {
+ 186          //     unsigned char i, j, k;
+ 187          
+ 188          //     _nop_();
+ 189          //     _nop_();
+ 190          //     i = 3;
+ 191          //     j = 14;
+ 192          //     k = 67;
+ 193          //     do
+ 194          //     {
+ 195          //         do
+ 196          //         {
+ 197          //             while (--k)
+ 198          //                 ;
+ 199          //         } while (--j);
+ 200          //     } while (--i);
+ 201          // }
+ 202          
+ 203          /**
+ 204           * @brief       串口接收通用数据帧解析器
+ 205           * @details
+ 206           * @param       None
+ 207           * @retval      None
+ 208           */
+ 209          void Uartx_Parser(void)
+ 210          {
+ 211   1          Uart_HandleTypeDef *puart = Uart_Group;
+ 212   1      
+ 213   1          for (; puart && (puart < Uart_Group + UART_GROUP_SIZE()); puart++)
+ 214   1          {
+ 215   2              if (__GET_FLAG(puart->Rx.flag, Finish_Flag))
+ 216   2              {
+ 217   3                  __RESET_FLAG(puart->Rx.flag, Finish_Flag);
+ 218   3                  switch (puart->Instance)
+ 219   3                  {
+ 220   4                  case UART1:
+ 221   4                  {
+ 222   5      #define ES1 NULL
+ 223   5                      ES = 0;
+ 224   5                      ES = 1;
+ 225   5                      // Uartx_Printf(&Uart1, "uart1.____________________________\r\n");
+ 226   5                  }
+ 227   4                  break;
+ 228   4                  case UART2:
+ 229   4                  {
+ 230   5                      IE2 &= ~ES2;
+ 231   5                      Modbus_Object.Slave.pRbuf = puart->Rx.pbuf;
+ 232   5                      Modbus_Object.Slave.RxCount = puart->Rx.rx_count;
+ 233   5                      Modbus_Object.Mod_Poll(&Modbus_Object);
+ 234   5                      IE2 |= ES2;
+ 235   5                      // Uartx_Printf(&Uart2, "uart2.____________________________\r\n");
+ 236   5                  }
+ 237   4                  break;
+ 238   4                  case UART3:
+C51 COMPILER V9.60.0.0   MAIN                                                              08/03/2022 21:25:24 PAGE 5   
+
+ 239   4                  {
+ 240   5                      IE2 &= ~ES3;
+ 241   5                      Discharger_Handle(&discharger, puart);
+ 242   5                      IE2 |= ES3;
+ 243   5                      // Uartx_Printf(&Uart3, "uart3.____________________________\r\n");
+ 244   5                  }
+ 245   4                  break;
+ 246   4                  case UART4:
+ 247   4                  {
+ 248   5                      IE2 &= ~ES4;
+ 249   5                      // memcpy(Dwin_Objct.Slave.pRbuf, puart->Rx.pbuf, puart->Rx.rx_count);
+ 250   5                      Dwin_Object.Slave.pRbuf = puart->Rx.pbuf;
+ 251   5                      Dwin_Object.Slave.RxCount = puart->Rx.rx_count;
+ 252   5                      Dwin_Poll(&Dwin_Object);
+ 253   5                      IE2 |= ES4;
+ 254   5                      // Delay20ms();
+ 255   5                      // Uartx_Printf(&Uart4, "uart4.____________________________\r\n");
+ 256   5                  }
+ 257   4                  break;
+ 258   4                  default:
+ 259   4                      break;
+ 260   4                  }
+ 261   3                  // Uartx_SendStr(puart, puart->Rx.pbuf, puart->Rx.rx_count, UART_BYTE_SENDOVERTIME);
+ 262   3                  CLEAR_UARTX_BUFFER(puart);
+ 263   3              }
+ 264   2          }
+ 265   1      }
+ 266          
+ 267          /**
+ 268           * @brief       主动请求放电仪数据
+ 269           * @details
+ 270           * @param       None
+ 271           * @retval      None
+ 272           */
+ 273          void Master_Task(void)
+ 274          {
+ 275   1          Discharger_TypeDef *ps = &discharger;
+ 276   1          uint8_t data_buf[50] = {
+ 277   1              0x16, 0x03, 0x01, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+ 278   1              0x00, 0x17, 0x0A, 0x1A, 0x0F, 0x1E, 0x19, 0x22, 0x23, 0x26,
+ 279   1              0x34, 0x2A, 0x46, 0x2E, 0x5A, 0x32, 0x7D, 0x34, 0xBE, 0x35,
+ 280   1              0x3C, 0x00, 0x00, 0x19, 0x01, 0x00, 0x00, 0x0F, 0x01, 0x00,
+ 281   1              0xDC, 0xDC, 0xDC, 0xFF, 0xFF, 0xFF, 0x16, 0x08, 0x02, 0xFA};
+ 282   1          /*收到参数保存命令*/
+ 283   1          if (__GET_FLAG(ps->Storage.flag, Save_Flag))
+ 284   1          {
+ 285   2              __RESET_FLAG(ps->Storage.flag, Save_Flag);
+ 286   2              data_buf[0] = 0x15;
+ 287   2          }
+ 288   1          else
+ 289   1              data_buf[0] = 0x16;
+ 290   1      
+ 291   1          Set_DischargerParam(ps, data_buf);
+ 292   1          Uartx_SendStr(&Uart3, data_buf, sizeof(data_buf), UART_BYTE_SENDOVERTIME);
+ 293   1      }
+ 294          
+ 295          /**
+ 296           * @brief       放电数据统计
+ 297           * @details
+ 298           * @param       None
+ 299           * @retval      None
+ 300           */
+C51 COMPILER V9.60.0.0   MAIN                                                              08/03/2022 21:25:24 PAGE 6   
+
+ 301          void DisTimer_Task(void)
+ 302          {
+ 303   1          static uint32_t DisCharging_Times = 0;
+ 304   1          static float DisCharging_Quantity = 0;
+ 305   1          Discharger_TypeDef *pd = &discharger;
+ 306   1      
+ 307   1          if (__GET_FLAG(pd->Current.M_State, Work))
+ 308   1          {
+ 309   2              DisCharging_Times += 1U;
+ 310   2              /*统计充电电量*/
+ 311   2              DisCharging_Quantity += pd->Current.I_Discharger;
+ 312   2          }
+ 313   1          if (__GET_FLAG(pd->Current.M_State, Standy))
+ 314   1          {
+ 315   2              DisCharging_Times = 0U;
+ 316   2              /*统计充电电量*/
+ 317   2              DisCharging_Quantity = 0;
+ 318   2          }
+ 319   1      
+ 320   1          pd->Current.T_Discharger = __Get_ChargingTimes(DisCharging_Times);
+ 321   1          pd->Current.Q_Discharger = __Get_ChargingQuantity(DisCharging_Quantity);
+ 322   1      }
+ 323          
+ 324          #define __Mod_OprateReg(pm, pd, reg_type, opr_type, src_dat)                     \
+ 325              {                                                                            \
+ 326                  pm->Slave.Reg_Type = reg_type;                                           \
+ 327                  pm->Slave.Operate = Write;                                               \
+ 328                  Modbus_Operatex(pm, 0x00, (uint8_t *)&pd->Current, sizeof(pd->Current)); \
+ 329              }
+ 330          /**
+ 331           * @brief       迪文屏幕数据上报任务
+ 332           * @details     轮询模式
+ 333           * @param       None
+ 334           * @retval      None
+ 335           */
+ 336          void Report_Task(void)
+ 337          {
+ 338   1          Discharger_TypeDef *pd = &discharger;
+ 339   1          pModbusHandle pm = &Modbus_Object;
+ 340   1          uint8_t state = 0;
+ 341   1      
+ 342   1          /*数据写回输入寄存器*/
+ 343   1          pm->Slave.Reg_Type = InputRegister;
+ 344   1          pm->Slave.Operate = Write;
+ 345   1          if (!Modbus_Operatex(pm, 0x00, (uint8_t *)&pd->Current, sizeof(pd->Current)))
+ 346   1          {
+ 347   2      #if defined(USING_DEBUG)
+                      Debug("Coil reading failed!\r\n");
+                      return;
+              #endif
+ 351   2          }
+ 352   1          /*数据写回保持寄存器*/
+ 353   1          pm->Slave.Reg_Type = HoldRegister;
+ 354   1          pm->Slave.Operate = Write;
+ 355   1          if (!Modbus_Operatex(pm, 0x00, (uint8_t *)&pd->Storage, sizeof(pd->Storage)))
+ 356   1          {
+ 357   2      #if defined(USING_DEBUG)
+                      Debug("Coil reading failed!\r\n");
+                      return;
+              #endif
+ 361   2          }
+ 362   1          /*工作模式写回线圈*/
+C51 COMPILER V9.60.0.0   MAIN                                                              08/03/2022 21:25:24 PAGE 7   
+
+ 363   1          pm->Slave.Reg_Type = Coil;
+ 364   1          pm->Slave.Operate = Write;
+ 365   1          state = __GET_FLAG(pd->Storage.flag, P_Limit_Enable) ? 0xFF : 0x00;
+ 366   1          Modbus_Operatex(pm, 0x00, (uint8_t *)&state, sizeof(state));
+ 367   1          /*上报前台数据*/
+ 368   1          Dwin_Write(&Dwin_Object, V_BATTERY_ADDR, (uint8_t *)&(pd->Current), sizeof(Current_TypeDef));
+ 369   1          /*上报放电状态、放电动画和仪器状态*/
+ 370   1      }
+ 371          
+ 372          #if (DEBUGGING == 1)
+              /**
+               * @brief       硬件错误检测
+               * @details     轮询模式
+               * @param       None
+               * @retval      None
+               */
+              void HardDefault(uint8_t channel, uint8_t error)
+              {
+                  Uartx_Printf(&Uart1, "\r\nChannel %bd product a error:%bd\r\n", channel, error);
+              }
+              #endif
+ 384          
+ 385          #endif
+ 386          
+ 387          /************************************外设初始化************************************/
+ 388          /**
+ 389           * @brief       GPIO初始化
+ 390           * @details     初始化对应的外设引脚
+ 391           * @param       None
+ 392           * @retval      None
+ 393           */
+ 394          void Gpio_Init(void)
+ 395          {
+ 396   1          GPIO_InitTypeDef GPIO_InitStruct = {0};
+ 397   1          //    #ifdef EXTERNAL_CRYSTAL //只要有宏名，就成立
+ 398   1      #if EXTERNAL_CRYSTAL
+ 399   1          P_SW2 = 0x80;
+ 400   1          XOSCCR = 0xC0;
+ 401   1          /*启动外部晶振11.0592MHz*/
+ 402   1          while (!(XOSCCR & 1))
+ 403   1              ;
+ 404   1          /*时钟不分频*/
+ 405   1          CLKDIV = 0x01;
+ 406   1          /*选择外部晶振*/
+ 407   1          CKSEL = 0x01;
+ 408   1          P_SW2 = 0x00;
+ 409   1      #endif
+ 410   1          //  P_SW1 = 0xC0; //串口1切换到P4.3、4.4(P0.2、0.3)
+ 411   1          //  P_SW2 |= 0x01; //串口2切换到P4.0、4.2(P1.0、1.1)（新板子引脚问题）
+ 412   1      
+ 413   1          /*手册提示，串口1、2、3、4的发送引脚必须设置为强挽输出*/
+ 414   1          /**/
+ 415   1      #define USING_WIFI______________________________________
+ 416   1          {
+ 417   2      #define WIFI_RELORAD GPIO_Pin_4
+ 418   2      #define WIFI_READY GPIO_Pin_5
+ 419   2      #define WIFI_LINK GPIO_Pin_6
+ 420   2      #define WIFI_RESET GPIO_Pin_7
+ 421   2      #define WIFI_GPIO_PORT GPIO_P3
+ 422   2      
+ 423   2              GPIO_InitStruct.Mode = GPIO_OUT_PP;
+ 424   2              GPIO_InitStruct.Pin = WIFI_RELORAD | WIFI_RESET;
+C51 COMPILER V9.60.0.0   MAIN                                                              08/03/2022 21:25:24 PAGE 8   
+
+ 425   2              GPIO_Inilize(WIFI_GPIO_PORT, &GPIO_InitStruct);
+ 426   2      
+ 427   2              GPIO_InitStruct.Mode = GPIO_HighZ;
+ 428   2              GPIO_InitStruct.Pin = WIFI_READY | WIFI_LINK;
+ 429   2              GPIO_Inilize(WIFI_GPIO_PORT, &GPIO_InitStruct);
+ 430   2          }
+ 431   1      
+ 432   1      #define USING_W25QX______________________________________
+ 433   1          {
+ 434   2      #define W25QX_NSS GPIO_Pin_2
+ 435   2      #define W25QX_MOSI GPIO_Pin_3
+ 436   2      #define W25QX_MISO GPIO_Pin_4
+ 437   2      #define W25QX_CLK GPIO_Pin_5
+ 438   2      #define W25QX_PORT GPIO_P2
+ 439   2      
+ 440   2              GPIO_InitStruct.Mode = GPIO_OUT_PP;
+ 441   2              GPIO_InitStruct.Pin = W25QX_NSS | W25QX_CLK;
+ 442   2              GPIO_Inilize(W25QX_PORT, &GPIO_InitStruct);
+ 443   2      
+ 444   2              GPIO_InitStruct.Mode = GPIO_HighZ;
+ 445   2              GPIO_InitStruct.Pin = W25QX_MOSI | W25QX_MISO;
+ 446   2              GPIO_Inilize(W25QX_PORT, &GPIO_InitStruct);
+ 447   2          }
+ 448   1      
+ 449   1      #define USING_LTE______________________________________
+ 450   1          {
+ 451   2      #define LTE_RELORAD GPIO_Pin_6
+ 452   2      #define LTE_NET GPIO_Pin_7
+ 453   2      #define LTE_LINK GPIO_Pin_2
+ 454   2      #define LTE_RESET GPIO_Pin_3
+ 455   2      #define LTE_GPIO_PORT0 GPIO_P0
+ 456   2      #define LTE_GPIO_PORT1 GPIO_P1
+ 457   2      
+ 458   2              GPIO_InitStruct.Mode = GPIO_OUT_PP;
+ 459   2              GPIO_InitStruct.Pin = LTE_RELORAD;
+ 460   2              GPIO_Inilize(LTE_GPIO_PORT0, &GPIO_InitStruct);
+ 461   2              GPIO_InitStruct.Pin = LTE_RESET;
+ 462   2              GPIO_Inilize(LTE_GPIO_PORT1, &GPIO_InitStruct);
+ 463   2      
+ 464   2      #if (USING_RGB_LED)
+ 465   2              GPIO_InitStruct.Mode = GPIO_OUT_PP;
+ 466   2      #else
+                      GPIO_InitStruct.Mode = GPIO_HighZ;
+              
+              #endif
+ 470   2              GPIO_InitStruct.Pin = LTE_NET;
+ 471   2              GPIO_Inilize(LTE_GPIO_PORT0, &GPIO_InitStruct);
+ 472   2              GPIO_InitStruct.Mode = GPIO_HighZ;
+ 473   2              GPIO_InitStruct.Pin = LTE_LINK;
+ 474   2              GPIO_Inilize(LTE_GPIO_PORT1, &GPIO_InitStruct);
+ 475   2          }
+ 476   1      
+ 477   1      #define USING_IWDG______________________________________
+ 478   1          {
+ 479   2      #define IWDG GPIO_Pin_5
+ 480   2      #define IWDG_PORT GPIO_P5
+ 481   2      
+ 482   2              GPIO_InitStruct.Mode = GPIO_OUT_PP;
+ 483   2              GPIO_InitStruct.Pin = IWDG;
+ 484   2              GPIO_Inilize(IWDG_PORT, &GPIO_InitStruct);
+ 485   2          }
+ 486   1      #if (USING_RGB_LED)
+C51 COMPILER V9.60.0.0   MAIN                                                              08/03/2022 21:25:24 PAGE 9   
+
+ 487   1          GPIO_InitStruct.Mode = GPIO_OUT_PP;
+ 488   1          GPIO_InitStruct.Pin = GPIO_Pin_7;
+ 489   1          GPIO_Inilize(GPIO_P0, &GPIO_InitStruct);
+ 490   1      #endif
+ 491   1      }
+ 492          /************************************外设初始化************************************/
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   2236    ----
+   CONSTANT SIZE    =     71    ----
+   XDATA SIZE       =    143    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

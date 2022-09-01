@@ -1,0 +1,13 @@
+Build target 'Target 1'
+compiling dwin.c...
+linking...
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_DWIN_READ?DWIN
+
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    SEGMENT: ?PR?_MOD_46H?MODBUSMASTER
+
+Program Size: data=43.1 xdata=2091 code=16399
+creating hex file from ".\Objects\Discharge Meter"...
+".\Objects\Discharge Meter" - 0 Error(s), 2 Warning(s).
+Build Time Elapsed:  00:00:00
