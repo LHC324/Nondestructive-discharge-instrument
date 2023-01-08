@@ -4,7 +4,7 @@
 #include "usart.h"
 // #include "charger.h"
 #include "discharger.h"
-#include "Dwin.h"
+#include "dwin.h"
 #include "wifi.h"
 #include "eeprom.h"
 #include "Modbus.h"
@@ -30,9 +30,9 @@ TIMERS Timer_Group[] = {
 #if (DEBUGGING == 1)
     {0, 100, true, false, Debug_Task}, /*调试接口（3s）*/
 #else
-    {0, 10, true, false, Uartx_Parser},    /*通用串口数据接收解析器(10ms)*/
-    {0, 1000, true, false, Report_Task},   /*上报放电仪数据到迪文屏幕（1.0s）*/
-    {0, 500, true, false, Master_Task},    /*主动请求放电仪数据（0.5S）*/
+    {0, 100, true, false, Uartx_Parser},   /*通用串口数据接收解析器(10ms)*/
+    {0, 1500, true, false, Report_Task},   /*上报放电仪数据到迪文屏幕（1.0s）*/
+    {0, 1000, true, false, Master_Task},   /*主动请求放电仪数据（0.5S）*/
     {0, 1000, true, false, DisTimer_Task}, /*放电数据统计（0.5S）*/
 
 #endif
@@ -40,6 +40,35 @@ TIMERS Timer_Group[] = {
 /*获得当前软件定时器个数*/
 const uint8_t g_TimerNumbers = sizeof(Timer_Group) / sizeof(TIMERS);
 #endif
+
+/**
+ * The ASSERT function.
+ *
+ * @param ex_string is the assertion condition string.
+ *
+ * @param func is the function name when assertion.
+ *
+ * @param line is the file line number when assertion.
+ */
+void assert_handler(const char *ex_string, const char *func, size_t line)
+{
+    volatile char dummy = 0;
+
+    // if (rt_assert_hook == RT_NULL)
+    {
+#if (USING_DEBUG)
+        Uartx_Printf(&Uart1, "(%s) assertion failed at file:%s, line:%d \n",
+                     ex_string, func, line);
+#endif
+        while (dummy == 0)
+        {
+            IAP_CONTR = 0x60; // 复位单片机
+        }
+    }
+    // else
+    {
+    }
+}
 
 void main(void)
 {
@@ -94,7 +123,7 @@ void main(void)
     /*开总中断*/
     OPEN_GLOBAL_OUTAGE();
 #else
-    OSStart(); //启动操作系统
+    OSStart(); // 启动操作系统
 #endif
     // /*上报后台参数*/
     // Dwin_Write(&Dwin_Objct, SLAVE_ID_ADDR, (uint8_t *)&(discharger.Storage),
@@ -212,11 +241,24 @@ void Uartx_Parser(void)
 
     for (; puart && (puart < Uart_Group + UART_GROUP_SIZE()); puart++)
     {
+        /*迪文屏幕使用ringbuf*/
+#if (DWIN_USING_RB)
+        if (UART4 == puart->Instance)
+        {
+            IE2 &= ~ES4;
+            Dwin_Object.Slave.rb->size = (puart->Rx.rx_size - 1U);
+            Dwin_Object.Slave.rb->buf = puart->Rx.pbuf;
+            // ringbuffer_put(Dwin_Object.Slave.rb, puart->Rx.pbuf, puart->Rx.rx_count);
+            Dwin_Poll(&Dwin_Object);
+            IE2 |= ES4;
+        }
+#endif
         if (__GET_FLAG(puart->Rx.flag, Finish_Flag))
         {
             __RESET_FLAG(puart->Rx.flag, Finish_Flag);
             switch (puart->Instance)
             {
+#if !defined(USING_SIMULATE)
             case UART1:
             {
 #define ES1 NULL
@@ -225,6 +267,7 @@ void Uartx_Parser(void)
                 // Uartx_Printf(&Uart1, "uart1.____________________________\r\n");
             }
             break;
+#endif
             case UART2:
             {
                 IE2 &= ~ES2;
@@ -243,6 +286,7 @@ void Uartx_Parser(void)
                 // Uartx_Printf(&Uart3, "uart3.____________________________\r\n");
             }
             break;
+#if (!DWIN_USING_RB)
             case UART4:
             {
                 IE2 &= ~ES4;
@@ -255,6 +299,7 @@ void Uartx_Parser(void)
                 // Uartx_Printf(&Uart4, "uart4.____________________________\r\n");
             }
             break;
+#endif
             default:
                 break;
             }
@@ -318,7 +363,7 @@ void DisTimer_Task(void)
     }
 
     pd->Current.T_Discharger = __Get_ChargingTimes(DisCharging_Times);
-    pd->Current.Q_Discharger = __Get_ChargingQuantity(DisCharging_Quantity);
+    // pd->Current.Q_Discharger = __Get_ChargingQuantity(DisCharging_Quantity);
 }
 
 #define __Mod_OprateReg(pm, pd, reg_type, opr_type, src_dat)                     \
@@ -345,9 +390,9 @@ void Report_Task(void)
     if (!Modbus_Operatex(pm, 0x00, (uint8_t *)&pd->Current, sizeof(pd->Current)))
     {
 #if defined(USING_DEBUG)
-        Debug("Coil reading failed!\r\n");
-        return;
+//        Debug("Coil reading failed!\r\n");
 #endif
+        return;
     }
     /*数据写回保持寄存器*/
     pm->Slave.Reg_Type = HoldRegister;
@@ -355,15 +400,17 @@ void Report_Task(void)
     if (!Modbus_Operatex(pm, 0x00, (uint8_t *)&pd->Storage, sizeof(pd->Storage)))
     {
 #if defined(USING_DEBUG)
-        Debug("Coil reading failed!\r\n");
-        return;
+//        Debug("Coil reading failed!\r\n");
 #endif
+        return;
     }
     /*工作模式写回线圈*/
     pm->Slave.Reg_Type = Coil;
     pm->Slave.Operate = Write;
     state = __GET_FLAG(pd->Storage.flag, P_Limit_Enable) ? 0xFF : 0x00;
-    Modbus_Operatex(pm, 0x00, (uint8_t *)&state, sizeof(state));
+
+    if (!Modbus_Operatex(pm, 0x00, (uint8_t *)&state, sizeof(state)))
+        return;
     /*上报前台数据*/
     Dwin_Write(&Dwin_Object, V_BATTERY_ADDR, (uint8_t *)&(pd->Current), sizeof(Current_TypeDef));
     /*上报放电状态、放电动画和仪器状态*/
@@ -412,6 +459,8 @@ void Gpio_Init(void)
 
     /*手册提示，串口1、2、3、4的发送引脚必须设置为强挽输出*/
     /**/
+
+#if !defined(USING_SIMULATE)
 #define USING_WIFI______________________________________
     {
 #define WIFI_RELORAD GPIO_Pin_4
@@ -428,6 +477,7 @@ void Gpio_Init(void)
         GPIO_InitStruct.Pin = WIFI_READY | WIFI_LINK;
         GPIO_Inilize(WIFI_GPIO_PORT, &GPIO_InitStruct);
     }
+#endif
 
 #define USING_W25QX______________________________________
     {

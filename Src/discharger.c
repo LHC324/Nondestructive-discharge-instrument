@@ -3,16 +3,24 @@
 
 Discharger_TypeDef discharger = {0};
 
+/*转换效率*/
+#define NCELL 0.9F
 /*获取交流电压*/
 #define __Get_VC_Voltage(uart, addr) \
     ((float)uart->Rx.pbuf[addr] * 25.6F + (float)uart->Rx.pbuf[addr + 1U] * 0.1F)
+/*获取交流电流*/
+#define __Get_AC_Current(p_vc, v_ac) (v_ac ? p_vc / v_ac : 0)
 /*获取直流电压*/
 #define __Get_DC_Voltage(uart, addr)                                                                \
     ((float)uart->Rx.pbuf[addr] * 32.0F + (float)((uart->Rx.pbuf[addr + 1U] & 0xF0) >> 4U) * 2.0F + \
      (float)(uart->Rx.pbuf[addr + 1U] & 0x0F) * 0.1F)
+/*获取直流电流*/
+#define __Get_DC_Current(p_vc, v_dc) (p_vc ? p_vc / (NCELL * v_dc) : 0)
 /*获取放电功率*/
 #define __Get_DisPower(uart, addr) \
     ((float)uart->Rx.pbuf[addr] * 25.6F + (float)uart->Rx.pbuf[addr + 1U] / 10.0F)
+/*获取当前转换效率*/
+#define __Get_NCELL(p_dc, p_ac) (p_ac ? (p_dc / p_ac) * 100.0F : 0)
 /*组合2字节数据*/
 #define __Get_Data(uart, addr) \
     ((uint16_t)(uart->Rx.pbuf[addr] << 8U | uart->Rx.pbuf[addr + 1U]))
@@ -31,16 +39,19 @@ void Discharger_Handle(Discharger_TypeDef *pd, Uart_HandleTypeDef *puart)
 #define DATA_START_ADDR 287U
     if (pd && puart)
     {
-		/*解决部分变量未清零*/
-		memset(&pd->Current, 0x00, sizeof(pd->Current));
+        /*解决部分变量未清零*/
+        // memset(&pd->Current, 0x00, sizeof(pd->Current));
         pd->Current.V_Discharger = __Get_VC_Voltage(puart, 280U);
         pd->Current.P_Discharger = __Get_DisPower(puart, 282U);
+        pd->Current.I_Discharger = __Get_AC_Current(pd->Current.P_Discharger, pd->Current.V_Discharger);
         pd->Current.V_Battery = __Get_DC_Voltage(puart, 284U);
+        pd->Current.I_Battery = __Get_DC_Current(pd->Current.P_Discharger, pd->Current.V_Battery);
+        pd->Current.E_Discharger = __Get_NCELL(pd->Current.P_Discharger, (pd->Current.V_Battery * pd->Current.I_Battery));
         pd->Current.S_Temperature = __Get_SystemTemparture(__Get_Data(puart, 292U));
-        if (pd->Current.V_Battery)
-        {
-            pd->Current.I_Discharger = (pd->Current.P_Discharger / pd->Current.V_Battery); //       *sqrt(3.0F);
-        }
+        // if (pd->Current.V_Battery)
+        // {
+        //     pd->Current.I_Discharger = (pd->Current.P_Discharger / pd->Current.V_Battery); //       *sqrt(3.0F);
+        // }
         // pd->Current.T_Discharger += 1;
         /*识别工作状态*/
         if (pd->Current.V_Discharger < 200.0F)

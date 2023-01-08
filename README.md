@@ -1,6 +1,7 @@
 # Nondestructive discharge instrument: 基于STC8的无损放电仪
 
 [![GitHub release](https://img.shields.io/badge/release-V1.0.0-blue.svg)](https://github.com/LHC324/Nondestructive-discharge-instrument/releases/latest) [![GitHub commits](https://img.shields.io/badge/commits--since-1.0.0-blue.svg)](https://github.com/LHC324/Nondestructive-discharge-instrument/compare/1.0.0...master) [![GNU licensed](https://img.shields.io/badge/license-GNU3.0-blue.svg)](https://github.com/LHC324/Nondestructive-discharge-instrument/blob/master/LICENSE)
+
 - [Nondestructive discharge instrument: 基于STC8的无损放电仪](#nondestructive-discharge-instrument-基于stc8的无损放电仪)
   - [更新说明](#更新说明)
   - [简介](#简介)
@@ -16,6 +17,7 @@
 
 | Date       | Author | Note          | Version number |
 | ---------- | ------ | ------------- | -------------- |
+| 2023.01.03 | LHC    |               | V1.0.1         |
 | 2022.09.01 | LHC    | First edition | V1.0.0         |
 
 ## 简介
@@ -26,6 +28,7 @@
 - DMG80480T043_01W:
   ![DMG80480T043_01W](Document/DMG80480T043_01W.jpg)
 - 特别说明：
+    
     > 本机加入了独立看们狗功能，永不死机。
 
 ## 功能

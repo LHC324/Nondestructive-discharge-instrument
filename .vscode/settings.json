@@ -24,6 +24,9 @@
         "dwin.h": "c",
         "stddef.h": "c",
         "STDDEF.H": "cpp",
-        "modbus.h": "c"
-    }
+        "modbus.h": "c",
+        "ringbuffer.h": "c",
+        "utils_ringbuffer.h": "c"
+    },
+    "C_Cpp.errorSquiggles": "disabled"
 }

@@ -3,25 +3,25 @@
 
 #include "config.h"
 
-//以下宏定义用于改变串口的输出引脚
-//串口1默认是p30 p31  以下定义的是串口1的切换
-// P_SW1 = 0xa2   P_SW2 = 0xba
+// 以下宏定义用于改变串口的输出引脚
+// 串口1默认是p30 p31  以下定义的是串口1的切换
+//  P_SW1 = 0xa2   P_SW2 = 0xba
 
 #define USART1_USE_P30_P31 P_SW1 = 0x00
 #define USART1_USE_P36_P37 P_SW1 = 0x40
 #define USART1_USE_P16_P17 P_SW1 = 0x80
 #define USART1_USE_P43_P44 P_SW1 = 0xC0
 
-//串口2的默认输出引脚为	P10 P11
+// 串口2的默认输出引脚为	P10 P11
 #define USART2_USE_P10_P11 P_SW2 = 0x00
 #define USART2_USE_P40_P42 P_SW2 = 0x01
 
-//串口3的默认输出引脚是 P00 P01
+// 串口3的默认输出引脚是 P00 P01
 
 #define USART3_USE_P00_P01 P_SW2 = 0x00
 #define USART3_USE_P50_P51 P_SW2 = 0x02
 
-//串口4的默认输出引脚为 P02 P03
+// 串口4的默认输出引脚为 P02 P03
 #define USART3_USE_P02_P03 P_SW1 = 0x00
 #define USART3_USE_P52_P53 P_SW1 = 0x04
 
@@ -72,7 +72,7 @@ typedef enum
 	Finish_Flag
 } Uart_Flag_Group;
 
-typedef struct //串口中断优先级
+typedef struct // 串口中断优先级
 {
 	uint8_t Register_IP;
 	uint8_t Register_IPH;
@@ -87,8 +87,8 @@ typedef struct Uart
 	uint8_t RunUart_Enable : 1;
 	uint8_t Interrupt_Enable;
 	uint8_t Register_AUXR;
-	volatile uint8_t Uartx_busy : 1; //串口接收占用标志
-	uint8_t Gpio_Switch : 1;		 //是否切换默认GPIO引脚
+	volatile uint8_t Uartx_busy : 1; // 串口接收占用标志
+	uint8_t Gpio_Switch : 1;		 // 是否切换默认GPIO引脚
 	UART_NVIC_TypeDef Uart_NVIC;
 	// void (*CallBack)(struct Uart *const);
 	struct
@@ -112,7 +112,9 @@ extern void Uart4_Init(uint16_t baud);
 
 void Uartx_SendStr(Uart_HandleTypeDef *const Uart, uint8_t *p, uint8_t length, uint16_t time_out);
 void Busy_Await(Uart_HandleTypeDef *const Uart, uint16_t overtime);
+#if (USING_DEBUG)
 void Uartx_Printf(Uart_HandleTypeDef *const uart, const char *format, ...);
+#endif
 
 // extern Uart_HandleTypeDef Uart1; //串口1句柄
 // extern Uart_HandleTypeDef Uart2; //串口2句柄

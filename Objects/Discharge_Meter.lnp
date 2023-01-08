@@ -6,6 +6,8 @@
 ".\Objects\usart.obj",
 ".\Objects\eeprom.obj",
 ".\Objects\discharger.obj",
-".\Objects\Modbus.obj" 
-TO ".\Objects\Discharge Meter" 
-PRINT(".\Listings\Discharge Meter.m51") RAMSIZE(256) 
+".\Objects\Modbus.obj",
+".\Objects\utils_ringbuffer.obj" 
+TO ".\Objects\Discharge_Meter" 
+
+PRINT(".\Listings\Discharge_Meter.map")

@@ -1,1 +1,0 @@
-"Src\ModbusMaster.c" LARGE OPTIMIZE (9,SPEED) BROWSE INCDIR(.\Inc;.\SmallRTOS\Inc) DEBUG OBJECTEXTEND PRINT(.\Listings\ModbusMaster.lst) OBJECT(.\Objects\ModbusMaster.obj)

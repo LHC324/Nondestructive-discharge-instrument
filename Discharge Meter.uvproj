@@ -46,7 +46,7 @@
             <InvalidFlash>1</InvalidFlash>
           </TargetStatus>
           <OutputDirectory>.\Objects\</OutputDirectory>
-          <OutputName>Discharge Meter</OutputName>
+          <OutputName>Discharge_Meter</OutputName>
           <CreateExecutable>1</CreateExecutable>
           <CreateLib>0</CreateLib>
           <CreateHexFile>1</CreateHexFile>
@@ -77,9 +77,9 @@
             <nStopB2X>0</nStopB2X>
           </BeforeMake>
           <AfterMake>
-            <RunUserProg1>0</RunUserProg1>
+            <RunUserProg1>1</RunUserProg1>
             <RunUserProg2>0</RunUserProg2>
-            <UserProg1Name></UserProg1Name>
+            <UserProg1Name>"G:\STC_Workers\Nondestructive discharge instrument\hex2bin.bat"</UserProg1Name>
             <UserProg2Name></UserProg2Name>
             <UserProg1Dos16Mode>0</UserProg1Dos16Mode>
             <UserProg2Dos16Mode>0</UserProg2Dos16Mode>
@@ -177,7 +177,7 @@
           </Flash1>
           <bUseTDR>0</bUseTDR>
           <Flash2></Flash2>
-          <Flash3></Flash3>
+          <Flash3>"" ()</Flash3>
           <Flash4></Flash4>
           <pFcarmOut></pFcarmOut>
           <pFcarmGrp></pFcarmGrp>
@@ -206,8 +206,8 @@
             <Mode2>0</Mode2>
             <useCB>0</useCB>
             <useXB>0</useXB>
-            <useL251>0</useL251>
-            <useA251>0</useA251>
+            <useL251>1</useL251>
+            <useA251>1</useA251>
             <Mx51>0</Mx51>
             <ModC812>0</ModC812>
             <ModCont>0</ModCont>
@@ -701,6 +701,11 @@
               <FileName>Modbus.c</FileName>
               <FileType>1</FileType>
               <FilePath>.\Src\Modbus.c</FilePath>
+            </File>
+            <File>
+              <FileName>utils_ringbuffer.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Src\utils_ringbuffer.c</FilePath>
             </File>
           </Files>
         </Group>

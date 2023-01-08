@@ -19,16 +19,33 @@
 /**********************布尔变量定义**********************/
 
 /***********************************API配置接口***********************************/
+/*使用仿真模式*/
+// #define USING_SIMULATE
 /*使用外部晶振*/
+#if defined(USING_SIMULATE)
+#define EXTERNAL_CRYSTAL 0
+#else
 #define EXTERNAL_CRYSTAL 1
+#endif
+/*使用自动下载功能*/
+#define UAING_AUTO_DOWNLOAD 1
+/*EEPROM使用MOVC指令*/
+#define EEPROM_USING_MOVC 1
+/*flash用做EEPROM尺寸*/
+#define EEPROM_SIZE() (64U * 1024U)
 /*调试是否启用串口*/
 #define USE_PRINTF_DEBUG 0
+#if defined(USING_SIMULATE)
 /*调试选项*/
+#define USING_DEBUG 0
+#else
+#define USING_DEBUG 1
+#endif
 #define DEBUGGING 0
-/*使用仿真模式*/
-#define USING_SIMULATE 1
 /*迪文屏幕使用CRC校验*/
 #define USING_CRC 1
+/*迪文屏幕使用环形缓冲区接收数据*/
+#define DWIN_USING_RB 1
 #define USING_RGB_LED 1
 /*定义WIFI模块相关引脚*/
 #define WIFI_RELOADPIN P34
@@ -50,7 +67,11 @@
 #define UNUSED_PARAMETER(x) UNUSED_VARIABLE(x)
 
 //(1/FOSC)*count =times(us)->count = time*FOSC/1000(ms)
-#define FOSC 25000000UL // 11059200UL
+#if defined(USING_SIMULATE)
+#define FOSC 24000000UL // 11059200UL
+#else
+#define FOSC 20000000UL
+#endif
 /*1ms(时钟频率越高，所能产生的时间越小)*/
 #define TIMES 1U
 /*定时器模式选择*/
@@ -84,14 +105,20 @@
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
 typedef unsigned short int uint16_t;
+typedef int int16_t;
 typedef unsigned long uint32_t;
 typedef signed long int32_t;
 typedef volatile __IO;
+typedef bit bool;
 
 /***********************************常用的数据类型***********************************/
 
 /***********************************系统上电参数***********************************/
+#if (!EEPROM_USING_MOVC)
 #define DEFAULT_SYSTEM_ADDR 0x0000
+#else
+#define DEFAULT_SYSTEM_ADDR 0xFC00
+#endif
 #define DEFAULT_SYSTEM_PARAMETER "\xFF\xFF\xFF\xFF\x02\x01\x00\x84\x50"
 
 /***********************************系统上电参数***********************************/
@@ -106,6 +133,103 @@ typedef volatile __IO;
 
 #define GET_PARAM_SITE(TYPE, MEMBER, SIZE) (offsetof(TYPE, MEMBER) / sizeof(SIZE))
 /***********************************结构体的妙用 ***********************************/
+
+/***********************************中断函数声明区***********************************/
+/*-----------------------------------------------------------------------
+|                         ISR FUNCTION(Public STC)                      |
+-----------------------------------------------------------------------*/
+
+/*--------------------------------------------------------
+| @Description: EXTI ISR define                          |
+--------------------------------------------------------*/
+
+#define EXTI0_ISRQ_Handler(void) EXTI0_ISR(void) interrupt 0
+#define EXTI1_ISRQ_Handler(void) EXTI1_ISR(void) interrupt 2
+#define EXTI2_ISRQ_Handler(void) EXTI2_ISR(void) interrupt 10
+#define EXTI3_ISRQ_Handler(void) EXTI3_ISR(void) interrupt 11
+#define EXTI4_ISRQ_Handler(void) EXTI4_ISR(void) interrupt 16
+
+/*--------------------------------------------------------
+| @Description: TIMER ISR define                         |
+--------------------------------------------------------*/
+
+#define TIMER0_ISRQ_Handler(void) TIMER0_ISR(void) interrupt 1
+#define TIMER1_ISRQ_Handler(void) TIMER1_ISR(void) interrupt 3
+#define TIMER2_ISRQ_Handler(void) TIMER2_ISR(void) interrupt 12
+#define TIMER3_ISRQ_Handler(void) TIMER3_ISR(void) interrupt 19
+#define TIMER4_ISRQ_Handler(void) TIMER4_ISR(void) interrupt 20
+
+/*--------------------------------------------------------
+| @Description: UART ISR define                          |
+--------------------------------------------------------*/
+
+#define UART1_ISRQ_Handler(void) UART1_ISR(void) interrupt 4 using 0
+#define UART2_ISRQ_Handler(void) UART2_ISR(void) interrupt 8 using 1
+#define UART3_ISRQ_Handler(void) UART3_ISR(void) interrupt 17 using 2
+#define UART4_ISRQ_Handler(void) UART4_ISR(void) interrupt 18 using 3
+
+/*--------------------------------------------------------
+| @Description: SPI ISR define                           |
+--------------------------------------------------------*/
+
+#define SPI_ISRQ_Handler(void) SPI_ISR(void) interrupt 9
+
+/*--------------------------------------------------------
+| @Description: COMP ISR define                          |
+--------------------------------------------------------*/
+
+#define COMP_ISRQ_Handler(void) COMP_ISR(void) interrupt 21
+
+/*--------------------------------------------------------
+| @Description: I2C ISR define                           |
+--------------------------------------------------------*/
+
+#define I2C_ISRQ_Handler(void) I2C_ISR(void) interrupt 24
+
+/*--------------------------------------------------------
+| @Description: LVD ISR define                           |
+--------------------------------------------------------*/
+
+#define LVD_ISRQ_Handler(void) LVD_ISR(void) interrupt 6
+
+/*-----------------------------------------------------------------------
+|                          ISR FUNCTION(STC8x)                          |
+-----------------------------------------------------------------------*/
+
+/*--------------------------------------------------------
+| @Description: ADC ISR define                           |
+--------------------------------------------------------*/
+
+// #if (PER_LIB_MCU_MUODEL == STC8Ax || PER_LIB_MCU_MUODEL == STC8Gx || PER_LIB_MCU_MUODEL == STC8Hx)
+#define ADC_ISRQ_Handler(void) ADC_ISR(void) interrupt 5
+// #endif
+
+/*--------------------------------------------------------
+| @Description: PCA ISR define                           |
+--------------------------------------------------------*/
+
+// #if (PER_LIB_MCU_MUODEL == STC8Ax || PER_LIB_MCU_MUODEL == STC8Gx)
+#define PCA_ISRQ_Handler(void) PCA_ISR(void) interrupt 7
+// #endif
+
+/*--------------------------------------------------------
+| @Description: PWM ISR define                           |
+--------------------------------------------------------*/
+
+// #if (PER_LIB_MCU_MUODEL == STC8Ax)
+#define PWM_ISRQ_Handler(void) PWM_ISR(void) interrupt 22
+#define PWM_ABD_ISRQ_Handler(void) PWM_ABD_ISR(void) interrupt 23
+// #endif
+
+#define ALIGN_SIZE 4
+#define ALIGN_DOWN(size, align) ((size) & ~((align)-1))
+extern void assert_handler(const char *ex_string, const char *func, size_t line);
+#define ASSERT(EX)                                       \
+        if (!(EX))                                       \
+        {                                                \
+                assert_handler(#EX, __FILE__, __LINE__); \
+        }
+/***********************************中断函数声明区 ***********************************/
 
 extern const uint8_t g_TimerNumbers;
 /***********************************函数声明***********************************/

@@ -1,10 +1,10 @@
-C51 COMPILER V9.60.0.0   DISCHARGER                                                        08/06/2022 14:34:50 PAGE 1   
+C51 COMPILER V9.60.0.0   DISCHARGER                                                        01/08/2023 15:24:25 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE DISCHARGER
 OBJECT MODULE PLACED IN .\Objects\discharger.obj
-COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE Src\discharger.c LARGE OPTIMIZE(9,SPEED) BROWSE INCDIR(.\Inc;.\SmallRTOS
-                    -\Inc) DEBUG OBJECTEXTEND PRINT(.\Listings\discharger.lst) OBJECT(.\Objects\discharger.obj)
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE Src\discharger.c LARGE OMF2 OPTIMIZE(9,SPEED) BROWSE INCDIR(.\Inc;.\Smal
+                    -lRTOS\Inc) DEBUG PRINT(.\Listings\discharger.lst) OBJECT(.\Objects\discharger.obj)
 
 line level    source
 
@@ -13,156 +13,172 @@ line level    source
    3          
    4          Discharger_TypeDef discharger = {0};
    5          
-   6          /*获取交流电压*/
-   7          #define __Get_VC_Voltage(uart, addr) \
-   8              ((float)uart->Rx.pbuf[addr] * 25.6F + (float)uart->Rx.pbuf[addr + 1U] * 0.1F)
-   9          /*获取直流电压*/
-  10          #define __Get_DC_Voltage(uart, addr)                                                                \
-  11              ((float)uart->Rx.pbuf[addr] * 32.0F + (float)((uart->Rx.pbuf[addr + 1U] & 0xF0) >> 4U) * 2.0F + \
-  12               (float)(uart->Rx.pbuf[addr + 1U] & 0x0F) * 0.1F)
-  13          /*获取放电功率*/
-  14          #define __Get_DisPower(uart, addr) \
-  15              ((float)uart->Rx.pbuf[addr] * 25.6F + (float)uart->Rx.pbuf[addr + 1U] / 10.0F)
-  16          /*组合2字节数据*/
-  17          #define __Get_Data(uart, addr) \
-  18              ((uint16_t)(uart->Rx.pbuf[addr] << 8U | uart->Rx.pbuf[addr + 1U]))
-  19          /*获取系统温度*/
-  20          #define __Get_SystemTemparture(x) \
-  21              (x > 320U ? (-35.02 * log(x) + 246.42F) : (-0.0916F * x + 72.756F))
-  22          
-  23          /**
-  24           * @brief       放电数据处理
-  25           * @details
-  26           * @param       None
-  27           * @retval      None
-  28           */
-  29          void Discharger_Handle(Discharger_TypeDef *pd, Uart_HandleTypeDef *puart)
-  30          {
-  31   1      #define DATA_START_ADDR 287U
-  32   1          if (pd && puart)
-  33   1          {
-  34   2                      /*解决部分变量未清零*/
-  35   2                      memset(&pd->Current, 0x00, sizeof(pd->Current));
-  36   2              pd->Current.V_Discharger = __Get_VC_Voltage(puart, 280U);
-  37   2              pd->Current.P_Discharger = __Get_DisPower(puart, 282U);
-  38   2              pd->Current.V_Battery = __Get_DC_Voltage(puart, 284U);
-  39   2              pd->Current.S_Temperature = __Get_SystemTemparture(__Get_Data(puart, 292U));
-  40   2              if (pd->Current.V_Battery)
-  41   2              {
-  42   3                  pd->Current.I_Discharger = (pd->Current.P_Discharger / pd->Current.V_Battery); //       *sqrt(
-             -3.0F);
-  43   3              }
-  44   2              // pd->Current.T_Discharger += 1;
-  45   2              /*识别工作状态*/
-  46   2              if (pd->Current.V_Discharger < 200.0F)
-  47   2              {
-  48   3                  __SET_FLAG(pd->Current.M_State, Error), __RESET_FLAG(pd->Current.M_State, Work),
-  49   3                      __RESET_FLAG(pd->Current.M_State, Standy), __RESET_FLAG(pd->Current.M_State, End);
-  50   3                  pd->Current.Animation = false;
-  51   3              }
-  52   2              else
-  53   2              {
-C51 COMPILER V9.60.0.0   DISCHARGER                                                        08/06/2022 14:34:50 PAGE 2   
+   6          /*转换效率*/
+   7          #define NCELL 0.9F
+   8          /*获取交流电压*/
+   9          #define __Get_VC_Voltage(uart, addr) \
+  10              ((float)uart->Rx.pbuf[addr] * 25.6F + (float)uart->Rx.pbuf[addr + 1U] * 0.1F)
+  11          /*获取交流电流*/
+  12          #define __Get_AC_Current(p_vc, v_ac) (v_ac ? p_vc / v_ac : 0)
+  13          /*获取直流电压*/
+  14          #define __Get_DC_Voltage(uart, addr)                                                                \
+  15              ((float)uart->Rx.pbuf[addr] * 32.0F + (float)((uart->Rx.pbuf[addr + 1U] & 0xF0) >> 4U) * 2.0F + \
+  16               (float)(uart->Rx.pbuf[addr + 1U] & 0x0F) * 0.1F)
+  17          /*获取直流电流*/
+  18          #define __Get_DC_Current(p_vc, v_dc) (p_vc ? p_vc / (NCELL * v_dc) : 0)
+  19          /*获取放电功率*/
+  20          #define __Get_DisPower(uart, addr) \
+  21              ((float)uart->Rx.pbuf[addr] * 25.6F + (float)uart->Rx.pbuf[addr + 1U] / 10.0F)
+  22          /*获取当前转换效率*/
+  23          #define __Get_NCELL(p_dc, p_ac) (p_ac ? (p_dc / p_ac) * 100.0F : 0)
+  24          /*组合2字节数据*/
+  25          #define __Get_Data(uart, addr) \
+  26              ((uint16_t)(uart->Rx.pbuf[addr] << 8U | uart->Rx.pbuf[addr + 1U]))
+  27          /*获取系统温度*/
+  28          #define __Get_SystemTemparture(x) \
+  29              (x > 320U ? (-35.02 * log(x) + 246.42F) : (-0.0916F * x + 72.756F))
+  30          
+  31          /**
+  32           * @brief       放电数据处理
+  33           * @details
+  34           * @param       None
+  35           * @retval      None
+  36           */
+  37          void Discharger_Handle(Discharger_TypeDef *pd, Uart_HandleTypeDef *puart)
+  38          {
+  39   1      #define DATA_START_ADDR 287U
+  40   1          if (pd && puart)
+  41   1          {
+  42   2              /*解决部分变量未清零*/
+  43   2              // memset(&pd->Current, 0x00, sizeof(pd->Current));
+  44   2              pd->Current.V_Discharger = __Get_VC_Voltage(puart, 280U);
+  45   2              pd->Current.P_Discharger = __Get_DisPower(puart, 282U);
+  46   2              pd->Current.I_Discharger = __Get_AC_Current(pd->Current.P_Discharger, pd->Current.V_Discharger);
+  47   2              pd->Current.V_Battery = __Get_DC_Voltage(puart, 284U);
+  48   2              pd->Current.I_Battery = __Get_DC_Current(pd->Current.P_Discharger, pd->Current.V_Battery);
+  49   2              pd->Current.E_Discharger = __Get_NCELL(pd->Current.P_Discharger, (pd->Current.V_Battery * pd->Curr
+             -ent.I_Battery));
+  50   2              pd->Current.S_Temperature = __Get_SystemTemparture(__Get_Data(puart, 292U));
+  51   2              // if (pd->Current.V_Battery)
+  52   2              // {
+  53   2              //     pd->Current.I_Discharger = (pd->Current.P_Discharger / pd->Current.V_Battery); //       *sq
+C51 COMPILER V9.60.0.0   DISCHARGER                                                        01/08/2023 15:24:25 PAGE 2   
 
-  54   3                  if (pd->Current.P_Discharger > 15.0F)
-  55   3                  {
-  56   4                      __RESET_FLAG(pd->Current.M_State, Error), __SET_FLAG(pd->Current.M_State, Work),
-  57   4                          __RESET_FLAG(pd->Current.M_State, Standy), __RESET_FLAG(pd->Current.M_State, End);
-  58   4                      __SET_FLAG(pd->Current.M_State, Start);
-  59   4                      pd->Current.Animation = true;
-  60   4                  }
-  61   3                  else
-  62   3                  {
-  63   4                      pd->Current.Animation = false;
-  64   4                      __SET_FLAG(pd->Current.M_State, Standy);
-  65   4                      __RESET_FLAG(pd->Current.M_State, Error), __RESET_FLAG(pd->Current.M_State, Work);
-  66   4                      __GET_FLAG(pd->Current.M_State, Start) ? __SET_FLAG(pd->Current.M_State, End)
-  67   4                                                             : __RESET_FLAG(pd->Current.M_State, End);
-  68   4                      /*放电对象被拔下，结束本轮放电*/
-  69   4                      if (pd->Current.V_Battery < 10.0F)
-  70   4                      {
-  71   5                          __RESET_FLAG(pd->Current.M_State, Start);
-  72   5                      }
-  73   4                  }
-  74   3              }
-  75   2          }
-  76   1          /*可以增加波形显示*/
-  77   1      }
-  78          
-  79          #define __Set_BufData(buf, site, value) \
-  80              (buf[site] = value)
-  81          /**
-  82           * @brief       根据放电参数设置数据帧
-  83           * @details
-  84           * @param       None
-  85           * @retval      None
-  86           */
-  87          void Set_DischargerParam(Discharger_TypeDef *pd, uint8_t *pbuf)
-  88          {
-  89   1          if (pd && pbuf)
-  90   1          {
-  91   2              /*设置从站ID*/
-  92   2              if (!(pd->Storage.Slave_Id > 0U) || !(pd->Storage.Slave_Id < 33U))
-  93   2              {
-  94   3                  pd->Storage.Slave_Id = 1U;
-  95   3              }
-  96   2              __Set_BufData(pbuf, 38, pd->Storage.Slave_Id);
-  97   2              /*设置内部限制*/
-  98   2              __GET_FLAG(pd->Storage.flag, Internal_Limit) ? __Set_BufData(pbuf, 4, 2U),
-  99   2                  __Set_BufData(pbuf, 5, 0U)               : (__Set_BufData(pbuf, 4, 0U), __Set_BufData(pbuf, 5,
-             - 1U));
- 100   2              /*设置电流极限*/
- 101   2              __GET_FLAG(pd->Storage.flag, I_Limit_Enable) ? __Set_BufData(pbuf, 31, 1U) : __Set_BufData(pbuf, 3
-             -1, 0U);
- 102   2              /*设置放电电流*/
- 103   2              if (!(pd->Storage.I_Limit > 0U) || !(pd->Storage.I_Limit < 36U))
+             -rt(3.0F);
+  54   2              // }
+  55   2              // pd->Current.T_Discharger += 1;
+  56   2              /*识别工作状态*/
+  57   2              if (pd->Current.V_Discharger < 200.0F)
+  58   2              {
+  59   3                  __SET_FLAG(pd->Current.M_State, Error), __RESET_FLAG(pd->Current.M_State, Work),
+  60   3                      __RESET_FLAG(pd->Current.M_State, Standy), __RESET_FLAG(pd->Current.M_State, End);
+  61   3                  pd->Current.Animation = false;
+  62   3              }
+  63   2              else
+  64   2              {
+  65   3                  if (pd->Current.P_Discharger > 15.0F)
+  66   3                  {
+  67   4                      __RESET_FLAG(pd->Current.M_State, Error), __SET_FLAG(pd->Current.M_State, Work),
+  68   4                          __RESET_FLAG(pd->Current.M_State, Standy), __RESET_FLAG(pd->Current.M_State, End);
+  69   4                      __SET_FLAG(pd->Current.M_State, Start);
+  70   4                      pd->Current.Animation = true;
+  71   4                  }
+  72   3                  else
+  73   3                  {
+  74   4                      pd->Current.Animation = false;
+  75   4                      __SET_FLAG(pd->Current.M_State, Standy);
+  76   4                      __RESET_FLAG(pd->Current.M_State, Error), __RESET_FLAG(pd->Current.M_State, Work);
+  77   4                      __GET_FLAG(pd->Current.M_State, Start) ? __SET_FLAG(pd->Current.M_State, End)
+  78   4                                                             : __RESET_FLAG(pd->Current.M_State, End);
+  79   4                      /*放电对象被拔下，结束本轮放电*/
+  80   4                      if (pd->Current.V_Battery < 10.0F)
+  81   4                      {
+  82   5                          __RESET_FLAG(pd->Current.M_State, Start);
+  83   5                      }
+  84   4                  }
+  85   3              }
+  86   2          }
+  87   1          /*可以增加波形显示*/
+  88   1      }
+  89          
+  90          #define __Set_BufData(buf, site, value) \
+  91              (buf[site] = value)
+  92          /**
+  93           * @brief       根据放电参数设置数据帧
+  94           * @details
+  95           * @param       None
+  96           * @retval      None
+  97           */
+  98          void Set_DischargerParam(Discharger_TypeDef *pd, uint8_t *pbuf)
+  99          {
+ 100   1          if (pd && pbuf)
+ 101   1          {
+ 102   2              /*设置从站ID*/
+ 103   2              if (!(pd->Storage.Slave_Id > 0U) || !(pd->Storage.Slave_Id < 33U))
  104   2              {
- 105   3                  pd->Storage.I_Limit = 1U;
+ 105   3                  pd->Storage.Slave_Id = 1U;
  106   3              }
- 107   2              __Set_BufData(pbuf, 33, pd->Storage.I_Limit);
- 108   2              /*检查功率和电流模式二选一*/
- 109   2              if (__GET_FLAG(pd->Storage.flag, I_Limit_Enable) && __GET_FLAG(pd->Storage.flag, P_Limit_Enable))
- 110   2              {
- 111   3                  __RESET_FLAG(pd->Storage.flag, P_Limit_Enable);
- 112   3              }
- 113   2              /*设置功率极限*/
-C51 COMPILER V9.60.0.0   DISCHARGER                                                        08/06/2022 14:34:50 PAGE 3   
+ 107   2              __Set_BufData(pbuf, 38, pd->Storage.Slave_Id);
+ 108   2              /*设置内部限制*/
+ 109   2              __GET_FLAG(pd->Storage.flag, Internal_Limit) ? __Set_BufData(pbuf, 4, 2U),
+ 110   2                  __Set_BufData(pbuf, 5, 0U)               : (__Set_BufData(pbuf, 4, 0U), __Set_BufData(pbuf, 5,
+             - 1U));
+ 111   2              /*设置电流极限*/
+ 112   2              __GET_FLAG(pd->Storage.flag, I_Limit_Enable) ? __Set_BufData(pbuf, 31, 1U) : __Set_BufData(pbuf, 3
+             -1, 0U);
+C51 COMPILER V9.60.0.0   DISCHARGER                                                        01/08/2023 15:24:25 PAGE 3   
 
- 114   2              __GET_FLAG(pd->Storage.flag, P_Limit_Enable) ? __Set_BufData(pbuf, 34, 1U) : __Set_BufData(pbuf, 3
+ 113   2              /*设置放电电流*/
+ 114   2              if (!(pd->Storage.I_Limit > 0U) || !(pd->Storage.I_Limit < 36U))
+ 115   2              {
+ 116   3                  pd->Storage.I_Limit = 1U;
+ 117   3              }
+ 118   2              __Set_BufData(pbuf, 33, pd->Storage.I_Limit);
+ 119   2              /*检查功率和电流模式二选一*/
+ 120   2              if (__GET_FLAG(pd->Storage.flag, I_Limit_Enable) && __GET_FLAG(pd->Storage.flag, P_Limit_Enable))
+ 121   2              {
+ 122   3                  __RESET_FLAG(pd->Storage.flag, P_Limit_Enable);
+ 123   3              }
+ 124   2              /*设置功率极限*/
+ 125   2              __GET_FLAG(pd->Storage.flag, P_Limit_Enable) ? __Set_BufData(pbuf, 34, 1U) : __Set_BufData(pbuf, 3
              -4, 0U);
- 115   2              /*设置放电功率*/
- 116   2              if (!(pd->Storage.P_Limit > 14U) || !(pd->Storage.P_Limit < 951U))
- 117   2              {
- 118   3                  pd->Storage.P_Limit = 15U;
- 119   3              }
- 120   2              __Set_BufData(pbuf, 36, pd->Storage.P_Limit >> 8U), __Set_BufData(pbuf, 37, pd->Storage.P_Limit);
- 121   2              /*设置放电截止电压*/
- 122   2              if (!(pd->Storage.V_CuttOff > 219U) || !(pd->Storage.V_CuttOff < 601U))
- 123   2              {
- 124   3                  pd->Storage.V_CuttOff = 220U;
- 125   3              }
- 126   2              __Set_BufData(pbuf, 32, pd->Storage.V_CuttOff >> 8U), __Set_BufData(pbuf, 35, pd->Storage.V_CuttOf
+ 126   2              /*设置放电功率*/
+ 127   2              if (!(pd->Storage.P_Limit > 14U) || !(pd->Storage.P_Limit < 951U))
+ 128   2              {
+ 129   3                  pd->Storage.P_Limit = 15U;
+ 130   3              }
+ 131   2              __Set_BufData(pbuf, 36, pd->Storage.P_Limit >> 8U), __Set_BufData(pbuf, 37, pd->Storage.P_Limit);
+ 132   2              /*设置放电截止电压*/
+ 133   2              if (!(pd->Storage.V_CuttOff > 219U) || !(pd->Storage.V_CuttOff < 601U))
+ 134   2              {
+ 135   3                  pd->Storage.V_CuttOff = 220U;
+ 136   3              }
+ 137   2              __Set_BufData(pbuf, 32, pd->Storage.V_CuttOff >> 8U), __Set_BufData(pbuf, 35, pd->Storage.V_CuttOf
              -f >> 8U);
- 127   2              __Set_BufData(pbuf, 40, pd->Storage.V_CuttOff), __Set_BufData(pbuf, 41, pd->Storage.V_CuttOff);
- 128   2              /*设置二次起放电压*/
- 129   2              if (!(pd->Storage.V_Reboot > 219U) || !(pd->Storage.V_Reboot < 601U))
- 130   2              {
- 131   3                  pd->Storage.V_Reboot = 220U;
- 132   3              }
- 133   2              __Set_BufData(pbuf, 39, pd->Storage.V_Reboot >> 8U), __Set_BufData(pbuf, 42, pd->Storage.V_Reboot)
+ 138   2              __Set_BufData(pbuf, 40, pd->Storage.V_CuttOff), __Set_BufData(pbuf, 41, pd->Storage.V_CuttOff);
+ 139   2              /*设置二次起放电压*/
+ 140   2              if (!(pd->Storage.V_Reboot > 219U) || !(pd->Storage.V_Reboot < 601U))
+ 141   2              {
+ 142   3                  pd->Storage.V_Reboot = 220U;
+ 143   3              }
+ 144   2              __Set_BufData(pbuf, 39, pd->Storage.V_Reboot >> 8U), __Set_BufData(pbuf, 42, pd->Storage.V_Reboot)
              -;
- 134   2          }
- 135   1      }
+ 145   2          }
+ 146   1      }
 
 
 MODULE INFORMATION:   STATIC OVERLAYABLE
-   CODE SIZE        =   1387    ----
+   CODE SIZE        =   1565    ----
    CONSTANT SIZE    =   ----    ----
-   XDATA SIZE       =     51      12
+   XDATA SIZE       =     55      12
    PDATA SIZE       =   ----    ----
    DATA SIZE        =   ----    ----
    IDATA SIZE       =   ----    ----
    BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
 END OF MODULE INFORMATION.
 
 

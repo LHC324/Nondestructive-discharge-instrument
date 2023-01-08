@@ -12,6 +12,28 @@
 #define WT_2M 0x86
 #define WT_1M 0x87
 
+// 使用的时候，将对应宏前面的注释符号去掉即可。
+// #define IAP_OFFSET 0x2000 //STC8A8K08S4A12
+// #define IAP_OFFSET 0x4000 //STC8A8K16S4A12
+// #define IAP_OFFSET 0x6000 //STC8A8K24S4A12
+// #define IAP_OFFSET 0x8000 //STC8A8K32S4A12
+// #define IAP_OFFSET 0xA000 //STC8A8K40S4A12
+// #define IAP_OFFSET 0xC000 //STC8A8K48S4A12
+// #define IAP_OFFSET 0xE000 //STC8A8K56S4A12
+// #define IAP_OFFSET 0xF000 //STC8A8K60S4A12
+// #define IAP_OFFSET 0xF000 //STC8A8K60S4A12
+/*自己计算给出*/
+// #define IAP_OFFSET 0xF300 //STC8A8K64S4A12-3k
+// #define IAP_OFFSET 0xF800 //STC8A8K64S4A12-2k
+// #define IAP_OFFSET 0xFC00 // STC8A8K64S4A12-1k
+// #define IAP_OFFSET 0xFE00 //STC8A8K64S4A12-0.5k
+// #define IAP_OFFSET 0x0000 // STC8A8K64S4A12-64k
+
+#define IAP_OFFSET (64U * 1024U - EEPROM_SIZE()) // STC8A8K64S4A12-64k
+
+/*OTA升级标志*/
+#define OTA_FLAG_ADDR (DEFAULT_SYSTEM_ADDR + 0x200U)
+
 /**
  * @brief	配置STC8单片机EEPROM的等待时间
  * @details
@@ -34,7 +56,7 @@ extern void IapIdle();
  * @param	addr: 指定地址
  * @retval	None
  */
-extern char IapRead(char addr);
+extern char IapRead(unsigned short addr);
 
 /**
  * @brief	在iap的e2prom的指定地址写入一个字节数据

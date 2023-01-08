@@ -1,5 +1,4 @@
 #include "eeprom.h"
-// #include "systemtimer.h"
 
 /*********************************************************
  * 函数名：IapConfigWaitTime()
@@ -41,10 +40,10 @@ static void IapConfigWaitTime()
  **********************************************************/
 void IapIdle()
 {
-	IAP_CONTR = 0x00; //关闭IAP功能
-	IAP_CMD = 0x00;	  //清除命令寄存器
-	IAP_TRIG = 0x00;  //清除触发寄存器
-	IAP_ADDRH = 0x80; //将地址设置到非IAP区域
+	IAP_CONTR = 0x00; // 关闭IAP功能
+	IAP_CMD = 0x00;	  // 清除命令寄存器
+	IAP_TRIG = 0x00;  // 清除触发寄存器
+	IAP_ADDRH = 0x80; // 将地址设置到非IAP区域
 	IAP_ADDRL = 0x00;
 }
 
@@ -56,15 +55,19 @@ void IapIdle()
  * note：
  *
  **********************************************************/
-char IapRead(char addr)
+char IapRead(uint16_t addr)
 {
+#if (1 == EEPROM_USING_MOVC)
+	addr += IAP_OFFSET;					  // 使用 MOVC 读取 EEPROM 需要加上相应的偏移
+	return *(unsigned char code *)(addr); // 使用 MOVC 读取数据
+#else
 	char dat = '\0';
 
 	IapConfigWaitTime();
 	IAP_CMD = 0x01; // EEPROM读命令
 	IAP_ADDRL = addr & 0xFF;
 	IAP_ADDRH = addr >> 8;
-	IAP_TRIG = 0x5A; //触发指令
+	IAP_TRIG = 0x5A; // 触发指令
 	IAP_TRIG = 0xA5;
 	dat = IAP_DATA;
 
@@ -75,6 +78,7 @@ char IapRead(char addr)
 	}
 	else
 		return dat;
+#endif
 }
 
 /*********************************************************
@@ -87,17 +91,16 @@ char IapRead(char addr)
  **********************************************************/
 void IapProgram(uint16_t addr, uint8_t dat)
 {
-	//    IAP_CONTR = WT_12M;//WT_24M;                //使能IAP
 	IapConfigWaitTime();
-	IAP_CMD = 0x02;					//设置IAP写命令
-	IAP_ADDRL = (uint8_t)addr;		//设置IAP低地址
-	IAP_ADDRH = (uint8_t)addr >> 8; //设置IAP高地址
-	IAP_DATA = dat;					//写IAP数据
-	IAP_TRIG = 0x5a;				//写触发命令(0x5a)
-	IAP_TRIG = 0xa5;				//写触发命令(0xa5)
+	IAP_CMD = 0x02;		   // 设置IAP写命令
+	IAP_ADDRL = addr;	   // 设置IAP低地址
+	IAP_ADDRH = addr >> 8; // 设置IAP高地址
+	IAP_DATA = dat;		   // 写IAP数据
+	IAP_TRIG = 0x5a;	   // 写触发命令(0x5a)
+	IAP_TRIG = 0xa5;	   // 写触发命令(0xa5)
 	//_nop_();
 	//	Delay_ms(5);//延时5毫秒
-	IapIdle(); //关闭IAP功能
+	IapIdle(); // 关闭IAP功能
 }
 
 /*********************************************************
@@ -110,16 +113,15 @@ void IapProgram(uint16_t addr, uint8_t dat)
  **********************************************************/
 void IapErase(uint16_t addr)
 {
-	//    IAP_CONTR = WT_12M;//WT_24M;                         //使能IAP
 	IapConfigWaitTime();
-	IAP_CMD = 0x03;					//设置IAP擦除命令
-	IAP_ADDRL = (uint8_t)addr;		//设置IAP低地址
-	IAP_ADDRH = (uint8_t)addr >> 8; //设置IAP高地址
-	IAP_TRIG = 0x5a;				//写触发命令(0x5a)
-	IAP_TRIG = 0xa5;				//写触发命令(0xa5)
+	IAP_CMD = 0x03;		   // 设置IAP擦除命令
+	IAP_ADDRL = addr;	   // 设置IAP低地址
+	IAP_ADDRH = addr >> 8; // 设置IAP高地址
+	IAP_TRIG = 0x5a;	   // 写触发命令(0x5a)
+	IAP_TRIG = 0xa5;	   // 写触发命令(0xa5)
 	//_nop_();                                    //
-	IapIdle(); //关闭IAP功能
-			   // Delay_ms(4); //延时5毫秒
+	IapIdle(); // 关闭IAP功能
+			   //  Delay_ms(4); //延时5毫秒
 }
 
 /*********************************************************

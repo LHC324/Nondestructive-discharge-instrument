@@ -1,0 +1,171 @@
+C51 COMPILER V9.60.0.0   UTILS_RINGBUFFER                                                  01/08/2023 15:24:25 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE UTILS_RINGBUFFER
+OBJECT MODULE PLACED IN .\Objects\utils_ringbuffer.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE Src\utils_ringbuffer.c LARGE OMF2 OPTIMIZE(9,SPEED) BROWSE INCDIR(.\Inc;
+                    -.\SmallRTOS\Inc) DEBUG PRINT(.\Listings\utils_ringbuffer.lst) OBJECT(.\Objects\utils_ringbuffer.obj)
+
+line level    source
+
+   1          /**
+   2           * \file
+   3           *
+   4           * \brief Ringbuffer functionality implementation.
+   5           *
+   6           * Copyright (c) 2014-2018 Microchip Technology Inc. and its subsidiaries.
+   7           *
+   8           * \asf_license_start
+   9           *
+  10           * \page License
+  11           *
+  12           * Subject to your compliance with these terms, you may use Microchip
+  13           * software and any derivatives exclusively with Microchip products.
+  14           * It is your responsibility to comply with third party license terms applicable
+  15           * to your use of third party software (including open source software) that
+  16           * may accompany Microchip software.
+  17           *
+  18           * THIS SOFTWARE IS SUPPLIED BY MICROCHIP "AS IS". NO WARRANTIES,
+  19           * WHETHER EXPRESS, IMPLIED OR STATUTORY, APPLY TO THIS SOFTWARE,
+  20           * INCLUDING ANY IMPLIED WARRANTIES OF NON-INFRINGEMENT, MERCHANTABILITY,
+  21           * AND FITNESS FOR A PARTICULAR PURPOSE. IN NO EVENT WILL MICROCHIP BE
+  22           * LIABLE FOR ANY INDIRECT, SPECIAL, PUNITIVE, INCIDENTAL OR CONSEQUENTIAL
+  23           * LOSS, DAMAGE, COST OR EXPENSE OF ANY KIND WHATSOEVER RELATED TO THE
+  24           * SOFTWARE, HOWEVER CAUSED, EVEN IF MICROCHIP HAS BEEN ADVISED OF THE
+  25           * POSSIBILITY OR THE DAMAGES ARE FORESEEABLE.  TO THE FULLEST EXTENT
+  26           * ALLOWED BY LAW, MICROCHIP'S TOTAL LIABILITY ON ALL CLAIMS IN ANY WAY
+  27           * RELATED TO THIS SOFTWARE WILL NOT EXCEED THE AMOUNT OF FEES, IF ANY,
+  28           * THAT YOU HAVE PAID DIRECTLY TO MICROCHIP FOR THIS SOFTWARE.
+  29           *
+  30           * \asf_license_stop
+  31           *
+  32           */
+  33          #include "utils_ringbuffer.h"
+  34          
+  35          /**
+  36           * \brief Ringbuffer init
+  37           */
+  38          int16_t ringbuffer_init(struct ringbuffer *const rb, void *buf, uint16_t size)
+  39          {
+  40   1              ASSERT(rb && buf && size);
+  41   1      
+  42   1              /*
+  43   1               * buf size must be aligned to power of 2
+  44   1               */
+  45   1              if ((size & (size - 1)) != 0)
+  46   1              {
+  47   2                      return ERR_INVALID_ARG;
+  48   2              }
+  49   1      
+  50   1              /* size - 1 is faster in calculation */
+  51   1              rb->size = size - 1;
+  52   1              rb->read_index = 0;
+  53   1              rb->write_index = rb->read_index;
+  54   1              rb->buf = (uint8_t *)buf;
+C51 COMPILER V9.60.0.0   UTILS_RINGBUFFER                                                  01/08/2023 15:24:25 PAGE 2   
+
+  55   1      
+  56   1              return ERR_NONE;
+  57   1      }
+  58          
+  59          /**
+  60           * \brief Get one byte from ringbuffer
+  61           *
+  62           */
+  63          int16_t ringbuffer_get(struct ringbuffer *const rb, uint8_t *dat)
+  64          {
+  65   1              ASSERT(rb && dat);
+  66   1      
+  67   1              if (rb->write_index != rb->read_index)
+  68   1              {
+  69   2                      *dat = rb->buf[rb->read_index & rb->size];
+  70   2                      rb->read_index++;
+  71   2                      return ERR_NONE;
+  72   2              }
+  73   1      
+  74   1              return ERR_NOT_FOUND;
+  75   1      }
+  76          
+  77          /**
+  78           * \brief Get multiple byte from ringbuffer
+  79           *
+  80           */
+  81          uint16_t ringbuffer_gets(struct ringbuffer *const rb, uint8_t *buf, uint16_t size)
+  82          {
+  83   1              uint16_t i = 0;
+  84   1              ASSERT(rb && buf);
+  85   1      
+  86   1              for (i = 0; i < size; ++i)
+  87   1              {
+  88   2                      if (ringbuffer_get(rb, &buf[i]))
+  89   2                              return i;
+  90   2              }
+  91   1      
+  92   1              return i;
+  93   1      }
+  94          
+  95          /**
+  96           * \brief Put one byte to ringbuffer
+  97           *
+  98           */
+  99          int16_t ringbuffer_put(struct ringbuffer *const rb, uint8_t dat)
+ 100          {
+ 101   1              ASSERT(rb);
+ 102   1      
+ 103   1              rb->buf[rb->write_index & rb->size] = dat;
+ 104   1      
+ 105   1              /*
+ 106   1               * buffer full strategy: new data will overwrite the oldest data in
+ 107   1               * the buffer
+ 108   1               */
+ 109   1              if ((rb->write_index - rb->read_index) > rb->size)
+ 110   1              {
+ 111   2                      rb->read_index = rb->write_index - rb->size;
+ 112   2              }
+ 113   1      
+ 114   1              rb->write_index++;
+ 115   1      
+ 116   1              return ERR_NONE;
+C51 COMPILER V9.60.0.0   UTILS_RINGBUFFER                                                  01/08/2023 15:24:25 PAGE 3   
+
+ 117   1      }
+ 118          
+ 119          /**
+ 120           * \brief Return the element number of ringbuffer
+ 121           */
+ 122          uint16_t ringbuffer_num(const struct ringbuffer *const rb)
+ 123          {
+ 124   1              ASSERT(rb);
+ 125   1      
+ 126   1              return rb->write_index - rb->read_index;
+ 127   1      }
+ 128          
+ 129          /**
+ 130           * \brief Flush ringbuffer
+ 131           */
+ 132          uint16_t ringbuffer_flush(struct ringbuffer *const rb)
+ 133          {
+ 134   1              ASSERT(rb);
+ 135   1      
+ 136   1              rb->read_index = rb->write_index;
+ 137   1      
+ 138   1              return ERR_NONE;
+ 139   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    707    ----
+   CONSTANT SIZE    =     64    ----
+   XDATA SIZE       =   ----      34
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

@@ -3,7 +3,7 @@
 #include "config.h"
 #include "usart.h"
 
-#define MS_CONVERT_MINUTE 60U //把应硬件定时器10ms换算成分钟
+#define MS_CONVERT_MINUTE 60U // 把应硬件定时器10ms换算成分钟
 #define S_CONVERT_HOUR 3600U  // 1S累计的电量换算成1h累计的电量
 /*
  * 获得当前充电电量：单位Ah
@@ -31,10 +31,10 @@ typedef enum
 
 typedef enum
 {
-    Internal_Limit, //内部限制
-    I_Limit_Enable, //使能电流极限
-    P_Limit_Enable, //使能功率极限
-    Save_Flag,      //参数保存标志
+    Internal_Limit, // 内部限制
+    I_Limit_Enable, // 使能电流极限
+    P_Limit_Enable, // 使能功率极限
+    Save_Flag,      // 参数保存标志
 } Discharger_Flag_Group;
 
 typedef struct
@@ -44,8 +44,10 @@ typedef struct
     float I_Discharger;
     float S_Temperature;
     uint32_t T_Discharger;
-    float Q_Discharger;
+    // float Q_Discharger;
+    float I_Battery;
     float P_Discharger;
+    float E_Discharger; /*转换效率*/
     // uint16_t W_State;   /*工作状态*/
     uint16_t M_State;       /*机器状态*/
     uint16_t Animation : 1; /*动画*/
