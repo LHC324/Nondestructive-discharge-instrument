@@ -112,9 +112,9 @@ extern void Uart4_Init(uint16_t baud);
 
 void Uartx_SendStr(Uart_HandleTypeDef *const Uart, uint8_t *p, uint8_t length, uint16_t time_out);
 void Busy_Await(Uart_HandleTypeDef *const Uart, uint16_t overtime);
-#if (USING_DEBUG)
+// #if (USING_DEBUG)
 void Uartx_Printf(Uart_HandleTypeDef *const uart, const char *format, ...);
-#endif
+// #endif
 
 // extern Uart_HandleTypeDef Uart1; //串口1句柄
 // extern Uart_HandleTypeDef Uart2; //串口2句柄

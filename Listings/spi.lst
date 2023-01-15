@@ -1,0 +1,144 @@
+C51 COMPILER V9.60.0.0   SPI                                                               01/15/2023 15:54:14 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE SPI
+OBJECT MODULE PLACED IN .\Objects\spi.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE Src\spi.c LARGE OMF2 OPTIMIZE(9,SPEED) BROWSE INCDIR(.\Inc;.\SmallRTOS\I
+                    -nc) DEBUG PRINT(.\Listings\spi.lst) OBJECT(.\Objects\spi.obj)
+
+line level    source
+
+   1          #include "spi.h"
+   2          
+   3          // bit spi_busy = false;
+   4          
+   5          // void SPI_ISRQ_Handler(void)
+   6          // {
+   7          //     if (SPSTAT & SPIF)
+   8          //     {
+   9          //         SPSTAT = 0xC0; // Clear interrupt flag
+  10          //         P22 = 1;
+  11          //         spi_busy = false;
+  12          //     }
+  13          // }
+  14          
+  15          /**
+  16           * @brief     SPI初始化函数。
+  17           * @details   SPI initialization function.
+  18           * @param[in] spix  SPI初始化结构体句柄，你需要定义它，并其地址传参。
+  19           *            you need to definean associated initialization handle,
+  20           *            And pass it by its address.
+  21           * @return    FSC_SUCCESS 返回成功。Return to success.
+  22           * @return    FSC_FAIL    返回失败。Return to fail.
+  23           **/
+  24          void spi_init(const SPIInit_Type *spix)
+  25          {
+  26   1          if (NULL == spix)
+  27   1              return;
+  28   1      
+  29   1          SPDAT = 0;
+  30   1          SPSTAT = SPIF | WCOL;
+  31   1          SPCTL = (SPCTL & 0x6F) | (spix->Type);
+  32   1          SPCTL = (SPCTL & 0xFC) | (spix->ClkSrc);
+  33   1          SPCTL = (SPCTL & 0xF3) | (spix->Mode << 2);
+  34   1          SPCTL = (SPCTL & 0xDF) | (spix->Tran << 5);
+  35   1          SPCTL = (SPCTL & 0xBF) | (spix->Run << 6);
+  36   1      }
+  37          
+  38          /**
+  39           * @brief     SPI发送数据（一个字节）函数。
+  40           * @details   SPI send data function.
+  41           * @param[in] dat   要发送的数据。 data of SPI.
+  42           * @return    FSC_SUCCESS 返回成功。Return to success.
+  43           * @return    FSC_FAIL    返回失败。Return to fail.
+  44           **/
+  45          void spi_send_data(uint8_t dat, uint16_t timeout)
+  46          {
+  47   1          // spi_busy = true;
+  48   1          SPDAT = dat; // Data register assignment
+  49   1          while (timeout--)
+  50   1          {
+  51   2              if (SPSTAT & 0x80)
+  52   2              {
+  53   3                  // Query completion flag
+  54   3                  SPSTAT = 0xC0; // Clear interrupt flag
+C51 COMPILER V9.60.0.0   SPI                                                               01/15/2023 15:54:14 PAGE 2   
+
+  55   3                  break;
+  56   3              }
+  57   2          }
+  58   1      
+  59   1          // while (spi_busy && timeout--)
+  60   1          //     ;
+  61   1      }
+  62          
+  63          /**
+  64           * @brief     SPI接收数据（一个字节）函数。
+  65           * @details   SPI receive data function.
+  66           * @param     None.
+  67           * @return    [uint8_t] 接收的数据。 receive data.
+  68           **/
+  69          uint8_t spi_receive_data(uint16_t timeout)
+  70          {
+  71   1          while (timeout--)
+  72   1          {
+  73   2              if (SPSTAT & 0x80)
+  74   2              {
+  75   3                  SPSTAT = 0xC0; // Clear interrupt flag
+  76   3                  break;
+  77   3              }
+  78   2      
+  79   2          }; // Query completion flag
+  80   1      
+  81   1          // spi_busy = true;
+  82   1          // while (spi_busy && timeout--)
+  83   1          //     ;
+  84   1      
+  85   1          return SPDAT; // Data register assignment
+  86   1      }
+  87          
+  88          /**
+  89           * @brief     SPI中断初始化函数。
+  90           * @details   SPI init NVIC function.
+  91           * @param[in] pri 中断优先级。interrupt priority.
+  92           * @param[in] run 使能控制位。enable control.
+  93           * @return    FSC_SUCCESS 返回成功。Return to success.
+  94           * @return    FSC_FAIL    返回失败。Return to fail.
+  95           **/
+  96          void NVIC_spi_init(NVICPri_Type pri, uint8_t run)
+  97          {
+  98   1          NVIC_SPI_PRI(pri);
+  99   1          IE2 = (IE2 & 0xFD) | (run << 1);
+ 100   1      }
+ 101          
+ 102          /**
+ 103           * @brief     SPI切换复用IO函数。
+ 104           * @details   SPI switch out port control function.
+ 105           * @param[in] port 复用IO枚举体。IO switch enumerator.
+ 106           * @return    FSC_SUCCESS 返回成功。Return to success.
+ 107           * @return    FSC_FAIL    返回失败。Return to fail.
+ 108           **/
+ 109          void GPIO_spi_sw_port(GPIOSWPort_Type port)
+ 110          {
+ 111   1          P_SW1 = (P_SW1 & 0xF3) | (port << 2);
+ 112   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    214    ----
+C51 COMPILER V9.60.0.0   SPI                                                               01/15/2023 15:54:14 PAGE 3   
+
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----       3
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

@@ -4,6 +4,10 @@ static void TIM_Base_MspInit(TIM_HandleTypeDef *const tim_baseHandle);
 // TIMERS Timer_Group[TIMER_EVENTS];
 TIM_HandleTypeDef Timer0;
 
+soft_timer_t soft_timer_group[] = {
+	{false, false, 0},
+};
+
 /*********************************************************
  * 函数名： Timer0_Init()
  * 功能：   定时器0 的初始化设置
@@ -67,7 +71,7 @@ void Timer0_ISR() interrupt 1
 
 	for (e = 0; e < g_TimerNumbers; e++)
 	{
-		if (Timer_Group[e].enable == true) //使能
+		if (Timer_Group[e].enable == true) // 使能
 		{
 			Timer_Group[e].timercnt++;
 			if (Timer_Group[e].timercnt == Timer_Group[e].targetcnt)
@@ -103,6 +107,18 @@ void Timer0_ISR() interrupt 1
 						__SET_FLAG(puart->Rx.flag, Finish_Flag);
 				}
 			}
+		}
+	}
+#define SOFT_TIMER_SET____________________________________
+	{ /*软件定时器*/
+		soft_timer_t *p = soft_timer_group;
+		for (; p < soft_timer_group + sizeof(soft_timer_group) / sizeof(soft_timer_group[0]); ++p)
+		{
+			// if (p->set_flag)
+			if (!(p->count))
+				p->flag = true;
+			else
+				p->count--;
 		}
 	}
 }

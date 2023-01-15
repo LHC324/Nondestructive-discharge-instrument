@@ -1,4 +1,4 @@
-C51 COMPILER V9.60.0.0   UTILS_RINGBUFFER                                                  01/08/2023 15:24:25 PAGE 1   
+C51 COMPILER V9.60.0.0   UTILS_RINGBUFFER                                                  01/15/2023 15:54:13 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE UTILS_RINGBUFFER
@@ -58,11 +58,11 @@ line level    source
   48   2              }
   49   1      
   50   1              /* size - 1 is faster in calculation */
-  51   1              rb->size = size - 1;
+  51   1              rb->size = size - 1; /*此处必须是2^n, 否则环形缓冲区存储出错：x%s = x&(s - 1)*/
   52   1              rb->read_index = 0;
   53   1              rb->write_index = rb->read_index;
   54   1              rb->buf = (uint8_t *)buf;
-C51 COMPILER V9.60.0.0   UTILS_RINGBUFFER                                                  01/08/2023 15:24:25 PAGE 2   
+C51 COMPILER V9.60.0.0   UTILS_RINGBUFFER                                                  01/15/2023 15:54:13 PAGE 2   
 
   55   1      
   56   1              return ERR_NONE;
@@ -126,7 +126,7 @@ line level    source
  114   1              rb->write_index++;
  115   1      
  116   1              return ERR_NONE;
-C51 COMPILER V9.60.0.0   UTILS_RINGBUFFER                                                  01/08/2023 15:24:25 PAGE 3   
+C51 COMPILER V9.60.0.0   UTILS_RINGBUFFER                                                  01/15/2023 15:54:13 PAGE 3   
 
  117   1      }
  118          

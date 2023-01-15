@@ -1,4 +1,4 @@
-C51 COMPILER V9.60.0.0   EEPROM                                                            01/08/2023 15:24:25 PAGE 1   
+C51 COMPILER V9.60.0.0   EEPROM                                                            01/15/2023 15:54:13 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE EEPROM
@@ -62,7 +62,7 @@ line level    source
   52           * 功能：  读函数  读出一个字节
   53           * 参数：
   54           * 作者：
-C51 COMPILER V9.60.0.0   EEPROM                                                            01/08/2023 15:24:25 PAGE 2   
+C51 COMPILER V9.60.0.0   EEPROM                                                            01/15/2023 15:54:13 PAGE 2   
 
   55           * note：
   56           *
@@ -126,7 +126,7 @@ line level    source
  114          void IapErase(uint16_t addr)
  115          {
  116   1              IapConfigWaitTime();
-C51 COMPILER V9.60.0.0   EEPROM                                                            01/08/2023 15:24:25 PAGE 3   
+C51 COMPILER V9.60.0.0   EEPROM                                                            01/15/2023 15:54:13 PAGE 3   
 
  117   1              IAP_CMD = 0x03;            // 设置IAP擦除命令
  118   1              IAP_ADDRL = addr;          // 设置IAP低地址
@@ -191,7 +191,7 @@ MODULE INFORMATION:   STATIC OVERLAYABLE
    FAR CONST SIZE   =   ----    ----
 END OF MODULE INFORMATION.
 
-C51 COMPILER V9.60.0.0   EEPROM                                                            01/08/2023 15:24:25 PAGE 4   
+C51 COMPILER V9.60.0.0   EEPROM                                                            01/15/2023 15:54:13 PAGE 4   
 
 
 C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

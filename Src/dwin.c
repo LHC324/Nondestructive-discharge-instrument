@@ -44,12 +44,15 @@ static DwinMap Dwin_ObjMap[] = {
 	{LOGIN_CANCEL_ADDR, 0xFFFF, 0, Dwin_LoginSure},
 	{PARAM_SAVE_ADDR, 0xFFFF, 0, Dwin_SaveSure},
 };
+
+#if (DWIN_USING_RB)
 struct ringbuffer dwin_rb = {
 	NULL,
 	0,
 	0,
 	0,
 };
+#endif
 
 DwinHandle Dwin_Object = {
 	DEFAULT_SYSTEM_ADDR,
@@ -242,10 +245,10 @@ dwin_result Dwin_Recv_Frame_Check(pDwinHandle pd, uint16_t *paddr)
 #if (!DWIN_USING_RB)
 	if ((dwin_rx_buf[0] != 0x5A) || (dwin_rx_buf[1] != 0xA5))
 #else
-	len = ringbuffer_gets(pd->Slave.rb, dwin_buf, 2U);
 	if (!ringbuffer_num(pd->Slave.rb)) // 无数据，直接退出
 		return err_other;
 
+	len = ringbuffer_gets(pd->Slave.rb, dwin_buf, 2U);
 	if ((2U != len) || (dwin_buf[0] != 0x5A) || (dwin_buf[1] != 0xA5))
 #endif
 	{

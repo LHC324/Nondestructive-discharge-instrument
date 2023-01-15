@@ -5,6 +5,10 @@
 #include "dwin.h"
 #endif
 
+#if (USIING_OTA)
+#include "Modbus.h"
+#endif
+
 /*********************************************************
 * 函数名：
 * 功能：
@@ -26,7 +30,7 @@
 // Uart_HandleTypeDef Uart4; //串口4句柄
 
 Uart_HandleTypeDef Uart_Group[4] = {0, 0, 0, 0};
-static uint8_t Uart1_Buffer[128], Uart2_Buffer[128], Uart3_Buffer[364], Uart4_Buffer[128];
+static uint8_t Uart1_Buffer[128], Uart2_Buffer[2048], Uart3_Buffer[364], Uart4_Buffer[128];
 
 #define S1BUF SBUF
 #define Uartx_CallBack(id)                                             \
@@ -186,6 +190,10 @@ void Uart2_Init(uint16_t baud) // 串口2选择定时器2作为波特率发生�
  **********************************************************/
 void UART2_ISRQ_Handler()
 {
+#if (USIING_OTA)
+    pModbusHandle pd = &Modbus_Object;
+    struct ringbuffer *const rb = pd->Slave.rb;
+#endif
     if (S2CON & S2TI) // 发送中断
     {
         S2CON &= ~S2TI;
@@ -195,7 +203,20 @@ void UART2_ISRQ_Handler()
     if (S2CON & S2RI) // 接收中断
     {
         S2CON &= ~S2RI;
-        Uartx_CallBack(2);
+#if (USIING_OTA)
+        if (!pd->Ota_Flag)
+        {
+#endif
+            Uartx_CallBack(2);
+#if (USIING_OTA)
+        }
+        else
+        {
+            if (NULL == pd || NULL == rb || NULL == rb->buf)
+                return;
+            _ringbuffer_put(2, rb);
+        }
+#endif
     }
 }
 
@@ -513,7 +534,7 @@ void Uartx_SendStr(Uart_HandleTypeDef *const Uart, uint8_t *p,
     }
 }
 
-#if (USING_DEBUG)
+// #if (USING_DEBUG)
 /*********************************************************
  * 函数名：char putchar(char str)
  * 功能：  putchar重定向,被printf调用
@@ -535,5 +556,5 @@ void Uartx_Printf(Uart_HandleTypeDef *const uart, const char *format, ...)
 
     Uartx_SendStr(uart, (uint8_t *)&uart_buf[0], length, UART_BYTE_SENDOVERTIME);
 }
-#endif
+// #endif
 /**********************************公用函数************************/

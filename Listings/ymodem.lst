@@ -1,0 +1,876 @@
+C51 COMPILER V9.60.0.0   YMODEM                                                            01/15/2023 15:54:13 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE YMODEM
+OBJECT MODULE PLACED IN .\Objects\ymodem.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE Src\ymodem.c LARGE OMF2 OPTIMIZE(9,SPEED) BROWSE INCDIR(.\Inc;.\SmallRTO
+                    -S\Inc) DEBUG PRINT(.\Listings\ymodem.lst) OBJECT(.\Objects\ymodem.obj)
+
+line level    source
+
+   1          #include "GPIO.h"
+   2          #include "timer.h"
+   3          #include "usart.h"
+   4          #include "eeprom.h"
+   5          #include "w25qx.h"
+   6          #include "ymodem.h"
+   7          #include "utils_ringbuffer.h"
+   8          
+   9          #if (!USING_DEBUG && YMODEM_USING_DEBUG)
+              #error Global debugging mode is not turned on!
+              #endif
+  12          
+  13          #define YMODEM_FLASH_SIZE USER_FLASH_ADDR
+  14          
+  15          extern struct ringbuffer rm_rb;
+  16          
+  17          /*************  本地变量声明      **************/
+  18          static uint8_t ym_buf[PACKET_1K_SIZE + PACKET_OVERHEAD];
+  19          static ymodem ymo = {0};
+  20          // static uint16_t ym_count = 0;
+  21          // uint8_t ota_flag;
+  22          
+  23          /*************  本地函数声明      **************/
+  24          // extern uint8_t *uint32_to_string(uint32_t num);
+  25          static ym_err_t Ymodem_Download(ymodem_t ym);
+  26          static ym_err_t ymodem_putchar(ym_err_t ym_code);
+  27          static ym_err_t ymodem_handshake(ymodem_t ym);
+  28          static ym_err_t ymodem_do_trans(ymodem_t ym);
+  29          static ym_err_t ymodem_do_fin(ymodem_t ym);
+  30          static ym_err_t ymodem_wait_start(ymodem_t ym);
+  31          
+  32          static void report_isp_information(ymodem_t ym)
+  33          {
+  34   1          if (NULL == ym)
+  35   1              return;
+  36   1      
+  37   1          Uartx_Printf(OTA_WORK_UART, "================================\r\nFile name: %s\r\n", ym->file_name);
+  38   1          Uartx_Printf(OTA_WORK_UART, "File length: %dBytes\r\n", ym->save.file_size);
+  39   1          Uartx_Printf(OTA_WORK_UART, "Bootloader Version:   2022-12-29 by LHC\r\n");
+  40   1          Uartx_Printf(OTA_WORK_UART, "================================\r\n\r\n");
+  41   1      }
+  42          
+  43          // static void reset_ota_flag(void)
+  44          // {
+  45          //     ota_flag = ~OTA_FLAG_VALUE;
+  46          //     if (read_ota_addr != (~OTA_FLAG_VALUE))
+  47          //         IapWrites(OTA_FLAG_ADDR, &ota_flag, sizeof(ota_flag)); // 擦除ota标志
+  48          // }
+  49          
+  50          // static void set_ota_flag(void)
+  51          // {
+  52          //     ota_flag = OTA_FLAG_VALUE;
+  53          //     if (read_ota_addr != OTA_FLAG_VALUE)
+  54          //         IapWrites(OTA_FLAG_ADDR, &ota_flag, sizeof(ota_flag)); // 写入ota标志
+C51 COMPILER V9.60.0.0   YMODEM                                                            01/15/2023 15:54:13 PAGE 2   
+
+  55          // }
+  56          
+  57          #define _ymodem_set_timer(__t)   \
+  58              do                           \
+  59              {                            \
+  60                  _timer_ota.flag = false; \
+  61                  _timer_ota.count = __t;  \
+  62              } while (false)
+  63          
+  64          char Ota_Menue(void *const rb)
+  65          {
+  66   1          ym_err_t res;
+  67   1          ymodem_t xdata ym = &ymo;
+  68   1      
+  69   1          ym->buf = ym_buf;
+  70   1          ym->rb = (struct ringbuffer *)rb;
+  71   1      
+  72   1          if ((NULL == ym->buf) || (NULL == ym->rb))
+  73   1              return -ym_err_other;
+  74   1      
+  75   1          switch (ym->cur_state)
+  76   1          {
+  77   2          case ym_wait:
+  78   2              res = ymodem_wait_start(ym);
+  79   2              break;
+  80   2          case ym_handshake:
+  81   2              res = ymodem_handshake(ym);
+  82   2              break;
+  83   2          case ym_trans_data:
+  84   2              res = ymodem_do_trans(ym);
+  85   2              break;
+  86   2          case ym_trans_end:
+  87   2              res = ymodem_do_fin(ym);
+  88   2              break;
+  89   2          // case ym_trans_fail:
+  90   2          //     memset(ym->comm, 0x00, sizeof(ym->comm));
+  91   2          //     ym->cur_state = ym_wait;
+  92   2          //     ym->next_state = ym_wait;
+  93   2          //     break;
+  94   2          case ym_transition:
+  95   2          {
+  96   3              ym->cur_state = ym->next_state;
+  97   3              memset(&ym->comm.count, 0x00, sizeof(ym->comm) - sizeof(ym->comm.flag));
+  98   3              // ym->comm.count = 0;
+  99   3              // ym->comm.len = 0;
+ 100   3          }
+ 101   2          break;
+ 102   2          default:
+ 103   2              // return -res;
+ 104   2              // ringbuffer_clean(rb);
+ 105   2              ym->comm.count = 0;
+ 106   2              break;
+ 107   2          }
+ 108   1      
+ 109   1          switch (res)
+ 110   1          {
+ 111   2          case ym_ok:
+ 112   2              Uartx_Printf(OTA_WORK_UART, "\r\nProgramming Completed Successfully !\r\n");
+ 113   2              report_isp_information(ym);
+ 114   2              break;
+ 115   2          case ym_user_cancel:
+ 116   2              Uartx_Printf(OTA_WORK_UART, "\r\n MCU abort !\r\n");
+C51 COMPILER V9.60.0.0   YMODEM                                                            01/15/2023 15:54:13 PAGE 3   
+
+ 117   2              break;
+ 118   2          case ym_pc_cancel:
+ 119   2              Uartx_Printf(OTA_WORK_UART, "\r\n User abort !\r\n");
+ 120   2              break;
+ 121   2          case ym_file_size_large:
+ 122   2              Uartx_Printf(OTA_WORK_UART, "\r\n File size is too large !\r\n");
+ 123   2              break;
+ 124   2          case ym_program_err:
+ 125   2              Uartx_Printf(OTA_WORK_UART, "\r\n Programming Error !\r\n");
+ 126   2              break;
+ 127   2          case ym_next:
+ 128   2              break;
+ 129   2          default:
+ 130   2              Uartx_Printf(OTA_WORK_UART, "\r\n other error: %bd.\r\n", res);
+ 131   2              break;
+ 132   2          }
+ 133   1      
+ 134   1          if (ym_next != res) // 产生错误时，清空系统信息
+ 135   1          {
+ 136   2              ringbuffer_clean(((struct ringbuffer *)rb));
+ 137   2              memset(&ym->comm, 0x00, sizeof(ym->comm));
+ 138   2              ym->cur_state = ym_wait;
+ 139   2              ym->next_state = ym_wait;
+ 140   2              if (ym_ok != res)
+ 141   2                  ymodem_putchar(YM_CAN);
+ 142   2          }
+ 143   1      
+ 144   1          return ((res >= ym_ok) && (res < ym_user_cancel) ? res : -res);
+ 145   1      }
+ 146          
+ 147          #if !defined USING_SIMULATE
+ 148          void display_hex_data(uint8_t *dat, uint32_t len)
+ 149          {
+ 150   1      #define __is_print(ch) ((unsigned int)((ch) - ' ') < 127u - ' ')
+ 151   1      #define HEXDUMP_WIDTH 16
+ 152   1          uint16_t i, j;
+ 153   1      
+ 154   1          if (NULL == dat || !len)
+ 155   1              return;
+ 156   1      
+ 157   1          for (i = 0; i < len; i += HEXDUMP_WIDTH)
+ 158   1          {
+ 159   2              Uartx_Printf(OTA_INFO_OUT_UART, "\r\n[%04x]: ", i);
+ 160   2              for (j = 0; j < HEXDUMP_WIDTH; ++j)
+ 161   2              {
+ 162   3                  if (i + j < len)
+ 163   3                  {
+ 164   4                      Uartx_Printf(OTA_INFO_OUT_UART, "%02bX ", dat[i + j]);
+ 165   4                  }
+ 166   3                  else
+ 167   3                  {
+ 168   4                      Uartx_Printf(OTA_INFO_OUT_UART, "   ");
+ 169   4                  }
+ 170   3              }
+ 171   2              Uartx_Printf(OTA_INFO_OUT_UART, "\t\t");
+ 172   2              for (j = 0; (i + j < len) && j < HEXDUMP_WIDTH; ++j)
+ 173   2                  Uartx_Printf(OTA_INFO_OUT_UART, "%c",
+ 174   2                               __is_print(dat[i + j]) ? dat[i + j] : '.');
+ 175   2          }
+ 176   1          if (len)
+ 177   1              Uartx_Printf(OTA_INFO_OUT_UART, "\r\n\r\n");
+ 178   1      }
+C51 COMPILER V9.60.0.0   YMODEM                                                            01/15/2023 15:54:13 PAGE 4   
+
+ 179          #endif
+ 180          
+ 181          static uint16_t ym_crc16(unsigned char *q, int len)
+ 182          {
+ 183   1          uint16_t crc;
+ 184   1          char i;
+ 185   1      
+ 186   1          crc = 0;
+ 187   1          while (--len >= 0)
+ 188   1          {
+ 189   2              crc = crc ^ (int)*q++ << 8;
+ 190   2              i = 8;
+ 191   2              do
+ 192   2              {
+ 193   3                  if (crc & 0x8000)
+ 194   3                      crc = crc << 1 ^ 0x1021;
+ 195   3                  else
+ 196   3                      crc = crc << 1;
+ 197   3              } while (--i);
+ 198   2          }
+ 199   1      
+ 200   1          return (crc);
+ 201   1      }
+ 202          
+ 203          // void ym_memcpy(void *s1, const void *s2, size_t n)
+ 204          // {
+ 205          //     uint8_t *dest = (uint8_t *)s1;
+ 206          //     const uint8_t *source = (const uint8_t *)s2;
+ 207          
+ 208          //     if (NULL == dest || NULL == source)
+ 209          //         return;
+ 210          
+ 211          //     while (n--)
+ 212          //     {
+ 213          //         *dest++ = *source++;
+ 214          //     }
+ 215          // }
+ 216          
+ 217          // #pragma OT(0)
+ 218          // void delay_1s(void) //@24MHz
+ 219          // {
+ 220          //     unsigned char i, j, k;
+ 221          
+ 222          //     _nop_();
+ 223          //     _nop_();
+ 224          //     i = 122;
+ 225          //     j = 193;
+ 226          //     k = 128;
+ 227          //     do
+ 228          //     {
+ 229          //         do
+ 230          //         {
+ 231          //             while (--k)
+ 232          //                 ;
+ 233          //         } while (--j);
+ 234          //     } while (--i);
+ 235          // }
+ 236          // #pragma OT(9)
+ 237          
+ 238          static ym_err_t ymodem_putchar(ym_err_t ym_code)
+ 239          {
+ 240   1          char c;
+C51 COMPILER V9.60.0.0   YMODEM                                                            01/15/2023 15:54:13 PAGE 5   
+
+ 241   1          uint8_t i;
+ 242   1          static uint8_t errors = 0;
+ 243   1      
+ 244   1          switch (ym_code)
+ 245   1          {
+ 246   2          case YM_PUT_C:
+ 247   2              c = CRC16;
+ 248   2              break;
+ 249   2          case YM_ACK:
+ 250   2              c = ACK;
+ 251   2              errors = 0;
+ 252   2              break;
+ 253   2          case YM_NACK:
+ 254   2              c = NAK;
+ 255   2              if (errors++ > MAX_ERRORS)
+ 256   2                  goto __exit;
+ 257   2              break;
+ 258   2          case YM_CAN:
+ 259   2              c = CANCEL;
+ 260   2              for (i = 0; i < RYM_END_SESSION_SEND_CAN_NUM; ++i)
+ 261   2                  Uartx_SendStr(OTA_WORK_UART, (uint8_t *)&c, sizeof(c), UART_BYTE_SENDOVERTIME);
+ 262   2              // delay_1s();
+ 263   2      
+ 264   2              return ym_ok;
+ 265   2          __exit:
+ 266   2          default:
+ 267   2              return ym_err_other;
+ 268   2          }
+ 269   1          Uartx_SendStr(OTA_WORK_UART, (uint8_t *)&c, sizeof(c), UART_BYTE_SENDOVERTIME);
+ 270   1          // if (YM_NACK == ym_code)
+ 271   1          //     delay_1s();
+ 272   1      
+ 273   1          return ym_next;
+ 274   1      }
+ 275          
+ 276          static ym_err_t ymodem_wait_start(ymodem_t ym)
+ 277          {
+ 278   1          if ((ym->comm.count < _ym_wait_counts) && _timer_ota.flag)
+ 279   1          {
+ 280   2              Uartx_Printf(OTA_WORK_UART, "\r\n Press 'd' to start......\r\n");
+ 281   2      
+ 282   2              if ((1U == ringbuffer_gets((struct ringbuffer *)ym->rb, ym->buf, 1U)) &&
+ 283   2                  (ym->buf[0] == 'd'))
+ 284   2              {
+ 285   3                  Uartx_Printf(OTA_WORK_UART, "\r\n\r\n Waiting for the file to be sent ... (press 'a' to abort)
+             -\r\n");
+ 286   3      
+ 287   3                  ym->cur_state = ym_transition;
+ 288   3                  ym->next_state = ym_handshake;
+ 289   3                  // ym->comm.count = 0;
+ 290   3              }
+ 291   2      
+ 292   2              if (ringbuffer_num((struct ringbuffer *)ym->rb)) // 清除堆积的错误数据
+ 293   2                  ringbuffer_flush((struct ringbuffer *)ym->rb);
+ 294   2      
+ 295   2              // if (fingbuffer_get_num(((struct ringbuffer *)ym->rb)))
+ 296   2              //     ringbuffer_clean(((struct ringbuffer *)ym->rb));
+ 297   2              ym->comm.count++;
+ 298   2              _ymodem_set_timer(_ym_delay_1s);
+ 299   2          }
+ 300   1      
+ 301   1          if (_ym_wait_counts == ym->comm.count)
+C51 COMPILER V9.60.0.0   YMODEM                                                            01/15/2023 15:54:13 PAGE 6   
+
+ 302   1              return ym_rec_timeout;
+ 303   1      
+ 304   1          return ym_next;
+ 305   1      }
+ 306          
+ 307          /**
+ 308           * @brief       ymodem对接flash擦除函数
+ 309           * @details 此处适配的擦除策略适用于w25Q64
+ 310           * @param       None
+ 311           * @retval      None
+ 312           */
+ 313          static ym_err_t ymodem_erase_falsh(ymodem_t ym)
+ 314          {
+ 315   1          /*快速擦除策略：不足一块的按一块补齐*/
+ 316   1          // uint8_t need_block = (ym->save.file_size + (DEV_FLASH_BLOCK_SIZE - 1U)) >> 16U;
+ 317   1          uint8_t regs[] = {0, 0};
+ 318   1      
+ 319   1          // #if (YMODEM_USING_DEBUG == 1)
+ 320   1          //     Uartx_Printf(OTA_INFO_OUT_UART, "need erase balock: %bd.\r\n", need_block);
+ 321   1          // #endif
+ 322   1      
+ 323   1          dev_flash_auto_adapt_erase(FLASH_START_ADDR, ym->save.file_size);
+ 324   1          // dev_flash_erase_chip();
+ 325   1      
+ 326   1      #if (YMODEM_USING_DEBUG)
+                  regs[0] = dev_flash_read_sr(FLASH_READ_SR1_CMD);
+                  regs[1] = dev_flash_read_sr(FLASH_READ_SR2_CMD);
+                  Uartx_Printf(OTA_INFO_OUT_UART, "regs(1~0): %#bx  %#bx\r\n", regs[1], regs[0]);
+                  dev_flash_read_bytes(ym->buf, 0x6f00, 1024);
+                  display_hex_data(ym->buf, 1024);
+              #endif
+ 333   1      
+ 334   1          return ym_next;
+ 335   1      
+ 336   1          //    uint16_t i;
+ 337   1          // for (i = FLASH_START_ADDR; i < YMODEM_FLASH_SIZE; i += SECTOR_SIZE) // 擦除N页
+ 338   1          //     IapErase(i);
+ 339   1      }
+ 340          
+ 341          /**
+ 342           * @brief       ymodem开始接收数据前处理工作
+ 343           * @version V1.0.0,2022/01/18
+ 344           * @details
+ 345           * @param       None
+ 346           * @retval      None
+ 347           */
+ 348          static ym_err_t ymodem_on_begin(ymodem_t ym, uint8_t *buf, uint16_t size)
+ 349          {
+ 350   1          char *file_name, *file_size;
+ 351   1      
+ 352   1          size = size;
+ 353   1      
+ 354   1          /* calculate and store file size */
+ 355   1          file_name = (char *)&buf[0];
+ 356   1          file_size = (char *)&buf[strlen(file_name) + 1];
+ 357   1      
+ 358   1          // memmove(ym->file_name, file_name, sizeof(ym->file_name));
+ 359   1          memcpy(ym->file_name, file_name, strlen(file_name)); // ym_memcpy
+ 360   1          ym->save.file_size = atoi(file_size);                // Str_To_Int(file_size)文件长度由字符串�
+             -��成十六进制数据
+ 361   1      
+ 362   1      #if (YMODEM_USING_DEBUG == 1)
+C51 COMPILER V9.60.0.0   YMODEM                                                            01/15/2023 15:54:13 PAGE 7   
+
+                  Uartx_Printf(OTA_INFO_OUT_UART, "[file name]: %s, [file size]: %d bytes.\r\n",
+                               ym->file_name, ym->save.file_size);
+              #endif
+ 366   1      
+ 367   1          if (!ym->save.file_size || ym->save.file_size >= YMODEM_FLASH_SIZE) // 长度过长错误
+ 368   1              return YM_CAN;                                                  // 错误返回N个 CA, 长度过�
+             -��
+ 369   1      
+ 370   1          Iap_Reads(STC_BOOT_JMP_ADDR, ym->jmp_code, sizeof(ym->jmp_code));
+ 371   1      #if (YMODEM_USING_DEBUG == 1)
+                  Uartx_Printf(OTA_INFO_OUT_UART, "boot loader addr: 0x%bX 0x%bX 0x%bX .\r\n",
+                               ym->jmp_code[0], ym->jmp_code[1], ym->jmp_code[2]);
+              
+              #endif
+ 376   1      
+ 377   1          if (ymodem_erase_falsh(ym) != ym_next)
+ 378   1              return ym_program_err;
+ 379   1      
+ 380   1          ym->next_flash_addr = FLASH_START_ADDR; //+ 3U 记录数据帧开始写入的首地址(3byte ISP code 
+             -+ 3Byte NULL)
+ 381   1      
+ 382   1          return ym_next; // 擦除完成, 返回应答
+ 383   1      }
+ 384          
+ 385          // #pragma OT(0)
+ 386          /**
+ 387           * @brief       ymodem发送握手信号
+ 388           * @version V1.0.0,2022/01/18
+ 389           * @details
+ 390           * @param       None
+ 391           * @retval      None
+ 392           */
+ 393          static ym_err_t ymodem_handshake(ymodem_t ym)
+ 394          {
+ 395   1          ym_err_t res;
+ 396   1          uint16_t rqe_crc16, rel_crc16;
+ 397   1          struct ringbuffer *rb = (struct ringbuffer *)ym->rb;
+ 398   1      
+ 399   1          if (!__GET_FLAG(ym->comm.flag, ym_step1) && _timer_ota.flag &&
+ 400   1              ym->comm.count < _ym_handshake_counts)
+ 401   1          { // xshell特殊握手信号
+ 402   2              ymodem_putchar(YM_PUT_C);
+ 403   2      
+ 404   2              ym->comm.len = ringbuffer_gets((struct ringbuffer *)ym->rb, ym->buf, 1);
+ 405   2      
+ 406   2              if (1U == ym->comm.len)
+ 407   2              {
+ 408   3                  if (ABORT1 == ym->buf[0] || ABORT2 == ym->buf[0])
+ 409   3                  {
+ 410   4                      return ym_pc_cancel;
+ 411   4                  }
+ 412   3                  else if (SOH == ym->buf[0] || STX == ym->buf[0])
+ 413   3                  {
+ 414   4                      __SET_FLAG(ym->comm.flag, ym_step1);
+ 415   4                      memset(&ym->comm.count, 0x00, sizeof(ym->comm) - sizeof(ym->comm.flag));
+ 416   4      
+ 417   4                      if (SOH == ym->buf[0])
+ 418   4                          ym->data_size = RE_PACKET_128B_SIZE;
+ 419   4                      else
+ 420   4                          ym->data_size = RE_PACKET_1K_SIZE;
+ 421   4                  }
+ 422   3              }
+C51 COMPILER V9.60.0.0   YMODEM                                                            01/15/2023 15:54:13 PAGE 8   
+
+ 423   2              _ymodem_set_timer(_ym_delay_100ms);
+ 424   2              ym->comm.count++;
+ 425   2          }
+ 426   1      
+ 427   1          if (!__GET_FLAG(ym->comm.flag, ym_step1))
+ 428   1          {
+ 429   2              if (_ym_handshake_counts == ym->comm.count)
+ 430   2                  return ym_rec_timeout;
+ 431   2      
+ 432   2              return ym_next;
+ 433   2          }
+ 434   1      
+ 435   1          if (!__GET_FLAG(ym->comm.flag, ym_step2) && _timer_ota.flag &&
+ 436   1              ym->comm.count < _ym_handshake_counts)
+ 437   1          {
+ 438   2              ym->comm.len += ringbuffer_gets((struct ringbuffer *)ym->rb, (ym->buf + ym->comm.len + 1U),
+ 439   2                                              ym->data_size - 1U - ym->comm.len);
+ 440   2      #if (YMODEM_USING_DEBUG == 1)
+                      Uartx_Printf(OTA_INFO_OUT_UART, "len: %d\r\n", ym->comm.len);
+              #endif
+ 443   2              if (ym->comm.len == ym->data_size - 1U)
+ 444   2              {
+ 445   3                  __SET_FLAG(ym->comm.flag, ym_step2);
+ 446   3              }
+ 447   2      
+ 448   2              // if (ym->comm.len && (ABORT1 == ym->buf[ym->comm.len - 1U]) ||
+ 449   2              //     (ABORT2 == ym->buf[ym->comm.len - 1U]))
+ 450   2              // {
+ 451   2              //     return ym_pc_cancel;
+ 452   2              // }
+ 453   2      
+ 454   2              _ymodem_set_timer(_ym_delay_100ms);
+ 455   2              ym->comm.count++;
+ 456   2          }
+ 457   1      
+ 458   1          if (!__GET_FLAG(ym->comm.flag, ym_step2))
+ 459   1          {
+ 460   2              if (_ym_handshake_counts == ym->comm.count)
+ 461   2                  return ym_rec_timeout;
+ 462   2      
+ 463   2              return ym_next;
+ 464   2          }
+ 465   1      
+ 466   1      #if !defined USING_SIMULATE
+ 467   1          display_hex_data(ym->buf, ym->comm.len);
+ 468   1      #endif
+ 469   1      
+ 470   1          /* sanity check */
+ 471   1          if (ym->buf[1] != 0 || ym->buf[2] != 0xFF)
+ 472   1              return ym_err_other;
+ 473   1      
+ 474   1          rqe_crc16 = ym_crc16(ym->buf + 3U, ym->data_size - 5U);
+ 475   1          rel_crc16 = ((uint16_t)ym->buf[ym->data_size - 2U] << 8U) | ym->buf[ym->data_size - 1U];
+ 476   1      #if (YMODEM_USING_DEBUG == 1)
+                  Uartx_Printf(OTA_INFO_OUT_UART, "req_crc\trel_crc\r\n%#x\t%#x\r\n", rqe_crc16, rel_crc16);
+              #endif
+ 479   1          if (rqe_crc16 != rel_crc16)
+ 480   1              return ym_recv_err;
+ 481   1      
+ 482   1          res = ymodem_on_begin(ym, ym->buf + 3U, ym->data_size - 5U);
+ 483   1          ym->packets = 0;
+ 484   1      
+C51 COMPILER V9.60.0.0   YMODEM                                                            01/15/2023 15:54:13 PAGE 9   
+
+ 485   1          if (res != ym_next)
+ 486   1          {
+ 487   2              return ym_err_other;
+ 488   2          }
+ 489   1      
+ 490   1          ym->comm.flag = 0;
+ 491   1          ym->cur_state = ym_transition;
+ 492   1          ym->next_state = ym_trans_data;
+ 493   1      
+ 494   1          ymodem_putchar(YM_ACK);
+ 495   1          ymodem_putchar(YM_PUT_C); // 请求pc发送数据帧
+ 496   1      
+ 497   1      #if (YMODEM_USING_DEBUG == 1)
+                  Uartx_Printf(OTA_INFO_OUT_UART, "Handshake succeeded,start recv data.\r\n");
+              #endif
+ 500   1      
+ 501   1          return res;
+ 502   1      }
+ 503          #pragma OT(9)
+ 504          
+ 505          /**
+ 506           * @brief       ymodem对接flash编程函数
+ 507           * @details 此处适配的编程策略适用于w25Q64
+ 508           * @param       None
+ 509           * @retval      None
+ 510           */
+ 511          static ym_err_t ymodem_program_falsh(ymodem_t ym, uint8_t *pdat, uint16_t len)
+ 512          {
+ 513   1          if (ym->next_flash_addr >= YMODEM_FLASH_SIZE)
+ 514   1              return ym_program_err;
+ 515   1      
+ 516   1          dev_flash_write_bytes_nocheck(pdat, ym->next_flash_addr, len);
+ 517   1          ym->next_flash_addr += len;
+ 518   1      
+ 519   1          return ym_next;
+ 520   1      
+ 521   1          // uint16_t base_addr;
+ 522   1          // for (base_addr = ym->next_flash_addr;
+ 523   1          //      pdat && ym->next_flash_addr < base_addr + size;
+ 524   1          //      ++ym->next_flash_addr, ++pdat) // 去掉3个字节帧头
+ 525   1          // {
+ 526   1          //     IapProgram(ym->next_flash_addr, *pdat);
+ 527   1      
+ 528   1          //     if (ym->next_flash_addr >= YMODEM_FLASH_SIZE)
+ 529   1          //         return ym_program_err;
+ 530   1          // }
+ 531   1          // return ym_next;
+ 532   1      }
+ 533          
+ 534          // #pragma OT(0)
+ 535          /**
+ 536           * @brief       用户处理数据帧
+ 537           * @details
+ 538           * @param       None
+ 539           * @retval      None
+ 540           */
+ 541          static ym_err_t ymodem_on_data(ymodem_t ym, uint8_t *pdat, uint16_t size)
+ 542          {
+ 543   1          // uint8_t t_jmp_code[3];
+ 544   1      
+ 545   1          // if (0 == ym->packets) // 第0帧数据特殊处理
+ 546   1          // {
+C51 COMPILER V9.60.0.0   YMODEM                                                            01/15/2023 15:54:13 PAGE 10  
+
+ 547   1          //     memcpy(t_jmp_code, pdat, sizeof(t_jmp_code));           // 取出应用程序跳转地址 ym_me
+             -mcpy
+ 548   1          //     memcpy(pdat, ym->jmp_code, sizeof(ym->jmp_code));       // 写回bootloader跳转地址
+ 549   1          //     memcpy(ym->jmp_code, t_jmp_code, sizeof(ym->jmp_code)); // 记录app跳转地址
+ 550   1          // }
+ 551   1      
+ 552   1          if (ymodem_program_falsh(ym, pdat, size) != ym_next)
+ 553   1              return ym_program_err;
+ 554   1      
+ 555   1      #if (YMODEM_USING_DEBUG == 1)
+                  Uartx_Printf(OTA_INFO_OUT_UART, "start\tend\tsize\tpackets\r\n%#x\t%#x\t%#x\t%#x\r\n",
+                               (ym->next_flash_addr - size), ym->next_flash_addr, size, ym->packets);
+              #endif
+ 559   1          return ym_next;
+ 560   1      }
+ 561          // #pragma OT(9)
+ 562          
+ 563          static ym_err_t ymodem_trans_data(ymodem_t ym)
+ 564          {
+ 565   1          ym_err_t ym_res;
+ 566   1          uint16_t tsz = 2U + ym->data_size + 2U;
+ 567   1          uint16_t rqe_crc16, rel_crc16;
+ 568   1      
+ 569   1          if (!__GET_FLAG(ym->comm.flag, ym_step2) && ym->comm.count < _ym_recv_counts)
+ 570   1          {
+ 571   2              ym->comm.len += ringbuffer_gets((struct ringbuffer *)ym->rb, ym->buf + 1U + ym->comm.len,
+ 572   2                                              tsz - ym->comm.len);
+ 573   2              if (ym->comm.len == tsz)
+ 574   2              {
+ 575   3                  __RESET_FLAG(ym->comm.flag, ym_step1);
+ 576   3                  __SET_FLAG(ym->comm.flag, ym_step2);
+ 577   3              }
+ 578   2              ym->comm.count++;
+ 579   2          }
+ 580   1      
+ 581   1          if (!__GET_FLAG(ym->comm.flag, ym_step2))
+ 582   1          {
+ 583   2              if (_ym_recv_counts == ym->comm.count)
+ 584   2                  return ym_rec_timeout;
+ 585   2      
+ 586   2              return ym_next;
+ 587   2          }
+ 588   1      
+ 589   1          if ((ym->buf[1] + ym->buf[2]) != 0xFF)
+ 590   1          {
+ 591   2              ym_res = ym_recv_err;
+ 592   2              goto __exit;
+ 593   2          }
+ 594   1      
+ 595   1          rqe_crc16 = ym_crc16(ym->buf + 3U, ym->data_size);
+ 596   1          rel_crc16 = ((uint16_t)ym->buf[ym->comm.len - 1U] << 8U) | ym->buf[ym->comm.len];
+ 597   1      #if (YMODEM_USING_DEBUG == 1)
+                  Uartx_Printf(OTA_INFO_OUT_UART, "req_crc\trel_crc\r\n%#x\t%#x\r\n", rqe_crc16, rel_crc16);
+              #endif
+ 600   1          if (rqe_crc16 != rel_crc16)
+ 601   1          {
+ 602   2              ym_res = ym_recv_err;
+ 603   2              goto __exit;
+ 604   2          }
+ 605   1      
+ 606   1          ym_res = ymodem_on_data(ym, ym->buf + 3U, ym->data_size);
+ 607   1          if (ym_next == ym_res)
+C51 COMPILER V9.60.0.0   YMODEM                                                            01/15/2023 15:54:13 PAGE 11  
+
+ 608   1          {
+ 609   2              memset(&ym->comm, 0x00, sizeof(ym->comm));
+ 610   2              ymodem_putchar(YM_ACK); // 保存完成, 返回应答
+ 611   2              // _ymodem_set_timer(_ym_delay_100ms); // 解决网络延时可能导致粘包问题
+ 612   2              ym->packets++;
+ 613   2          }
+ 614   1      
+ 615   1      __exit:
+ 616   1          return ym_res;
+ 617   1      }
+ 618          
+ 619          /**
+ 620           * @brief       ymodem连续接收数据帧
+ 621           * @details
+ 622           * @param       None
+ 623           * @retval      None
+ 624           */
+ 625          static ym_err_t ymodem_do_trans(ymodem_t ym)
+ 626          {
+ 627   1          ym_err_t ym_res;
+ 628   1          struct ringbuffer *rb = (struct ringbuffer *)ym->rb;
+ 629   1      
+ 630   1          if (!__GET_FLAG(ym->comm.flag, ym_step1) && //&& _timer_ota.flag
+ 631   1              ym->comm.count < _ym_recv_counts)
+ 632   1          {
+ 633   2              ym->comm.len = ringbuffer_gets((struct ringbuffer *)ym->rb, ym->buf, 1U);
+ 634   2      
+ 635   2              if (1U == ym->comm.len)
+ 636   2              {
+ 637   3                  switch (ym->buf[0])
+ 638   3                  {
+ 639   4                  case SOH:
+ 640   4                      ym->data_size = PACKET_SIZE;
+ 641   4                      __SET_FLAG(ym->comm.flag, ym_step1);
+ 642   4                      __RESET_FLAG(ym->comm.flag, ym_step2);
+ 643   4                      break;
+ 644   4                  case STX:
+ 645   4                      ym->data_size = PACKET_1K_SIZE;
+ 646   4                      __SET_FLAG(ym->comm.flag, ym_step1);
+ 647   4                      __RESET_FLAG(ym->comm.flag, ym_step2);
+ 648   4                      break;
+ 649   4                  case EOT:
+ 650   4                      ym->cur_state = ym_transition;
+ 651   4                      ym->next_state = ym_trans_end;
+ 652   4                      ymodem_putchar(YM_NACK);
+ 653   4      #if (YMODEM_USING_DEBUG == 1)
+                              Uartx_Printf(OTA_INFO_OUT_UART, "Data frame reception completed.\r\n");
+              #endif
+ 656   4                      return ym_next;
+ 657   4                      break;
+ 658   4                  default:
+ 659   4                  __repeat:
+ 660   4                      memset(&ym->comm, 0x00, sizeof(ym->comm));
+ 661   4                      if (fingbuffer_get_num(rb))
+ 662   4                          ringbuffer_clean(rb);
+ 663   4      
+ 664   4                      if (ymodem_putchar(YM_NACK) != ym_next)
+ 665   4                          return ym_recv_err;
+ 666   4      
+ 667   4                      return ym_next;
+ 668   4                      break;
+ 669   4                  }
+C51 COMPILER V9.60.0.0   YMODEM                                                            01/15/2023 15:54:13 PAGE 12  
+
+ 670   3                  ym->comm.count = 0;
+ 671   3                  ym->comm.len = 0;
+ 672   3              }
+ 673   2      
+ 674   2              ym->comm.count++;
+ 675   2          }
+ 676   1      
+ 677   1          if (!__GET_FLAG(ym->comm.flag, ym_step1))
+ 678   1          {
+ 679   2              if (_ym_recv_counts == ym->comm.count)
+ 680   2                  return ym_rec_timeout;
+ 681   2      
+ 682   2              return ym_next;
+ 683   2          }
+ 684   1      
+ 685   1          ym_res = ymodem_trans_data(ym);
+ 686   1      
+ 687   1          if (ym_res != ym_next)
+ 688   1          {
+ 689   2              goto __repeat;
+ 690   2          }
+ 691   1      
+ 692   1          return ym_res;
+ 693   1      }
+ 694          
+ 695          /**
+ 696           * @brief       ymodem用户收尾工作
+ 697           * @details
+ 698           * @param       None
+ 699           * @retval      None
+ 700           */
+ 701          static ym_err_t ymodem_on_end(ymodem_t ym)
+ 702          {
+ 703   1      
+ 704   1      #if (YMODEM_USING_DEBUG == 1)
+              #define READ_FLASH_SIZE 1024
+              #define YM_READ_FLASH_START_ADDR(_x) (ym->save.file_size - (_x)*READ_FLASH_SIZE) >> 10U
+                  uint8_t i, counts = (ym->save.file_size + (READ_FLASH_SIZE - 1U)) >> 10U;
+              
+                  //     Uartx_Printf(OTA_INFO_OUT_UART, "counts: %bd\r\n", counts);
+              
+                  for (i = YM_READ_FLASH_START_ADDR(2); i < counts; ++i) //(ym->save.file_size - 5 * READ_FLASH_SIZE) >>
+             - 10U
+                  {
+                      Uartx_Printf(OTA_INFO_OUT_UART, "\r\ncur count[%#bx]:", i);
+                      // memset(ym_buf, 0x00, sizeof(ym_buf));
+                      // Iap_Reads(addr, ym_buf, READ_FLASH_SIZE);
+                      dev_flash_read_bytes(ym->buf, FLASH_START_ADDR + i << 10U, READ_FLASH_SIZE);
+                      display_hex_data(ym->buf, READ_FLASH_SIZE);
+                  }
+                  // dev_flash_read_bytes(ym->buf, 0x0000, READ_FLASH_SIZE);
+                  // display_hex_data(ym->buf, READ_FLASH_SIZE);
+              #else
+ 722   1          ym = ym;
+ 723   1      #endif
+ 724   1      
+ 725   1          // IapWrites(YMODEM_FLASH_SIZE, ym->jmp_code, sizeof(ym->jmp_code)); // 写入用户程序跳转地址
+ 726   1      
+ 727   1          // IapWrites(OTA_FLAG_ADDR, (uint8_t *)&ym->save, sizeof(ym->save)); // 写入文件信息
+ 728   1          dev_flash_auto_adapt_erase(OTA_FLAG_ADDR, sizeof(ym->save));
+ 729   1          // dev_flash_read_bytes(ym->buf, OTA_FLAG_ADDR, 0x100);
+ 730   1          // display_hex_data(ym->buf, 0x100);
+C51 COMPILER V9.60.0.0   YMODEM                                                            01/15/2023 15:54:13 PAGE 13  
+
+ 731   1          ym->save.ota_value = OTA_FLAG_VALUE;
+ 732   1          dev_flash_write_page((uint8_t *)&ym->save, OTA_FLAG_ADDR, sizeof(ym->save));
+ 733   1          // dev_flash_write_bytes_nocheck((uint8_t *)&ym->save, OTA_FLAG_ADDR, sizeof(ym->save));
+ 734   1      
+ 735   1          // dev_flash_read_bytes(ym->buf, OTA_FLAG_ADDR, 0x100);
+ 736   1          // display_hex_data(ym->buf, 0x100);
+ 737   1      #if (YMODEM_USING_DEBUG == 1)
+                  dev_flash_read_bytes(ym->buf, OTA_FLAG_ADDR, sizeof(ym->save));
+                  Uartx_Printf(OTA_INFO_OUT_UART, "ota_flag\tflie_size(Bytes)\r\n%#X\t\t%#X\r\n",
+                               ((uint16_t)ym->buf[0] << 8U | ym->buf[1]), ((uint16_t)ym->buf[2] << 8U | ym->buf[3]));
+              #endif
+ 742   1      
+ 743   1      #if (YMODEM_USING_DEBUG == 1)
+                  // Iap_Reads(YMODEM_FLASH_SIZE, ym->jmp_code, sizeof(ym->jmp_code));
+                  // Uartx_Printf(OTA_INFO_OUT_UART, "app loader addr: 0x%bX 0x%bX 0x%bX .\r\n",
+                  //              ym->jmp_code[0], ym->jmp_code[1], ym->jmp_code[2]);
+              #endif
+ 748   1      
+ 749   1          return ym_next; // 正确
+ 750   1      }
+ 751          
+ 752          /**
+ 753           * @brief       ymodem收尾工作
+ 754           * @details
+ 755           * @param       None
+ 756           * @retval      None
+ 757           */
+ 758          static ym_err_t ymodem_do_fin(ymodem_t ym)
+ 759          {
+ 760   1          if (!__GET_FLAG(ym->comm.flag, ym_step1) && ym->comm.count < _ym_recv_counts)
+ 761   1          {
+ 762   2              ym->comm.len = ringbuffer_gets((struct ringbuffer *)ym->rb, ym->buf, 1U);
+ 763   2              if ((1U == ym->comm.len) && (EOT == ym->buf[0]))
+ 764   2              {
+ 765   3                  __SET_FLAG(ym->comm.flag, ym_step1);
+ 766   3              }
+ 767   2      
+ 768   2              ym->comm.count++;
+ 769   2          }
+ 770   1      
+ 771   1          if (!__GET_FLAG(ym->comm.flag, ym_step1))
+ 772   1          {
+ 773   2              if (_ym_recv_counts == ym->comm.count)
+ 774   2                  return ym_rec_timeout;
+ 775   2      
+ 776   2              return ym_next;
+ 777   2          }
+ 778   1      
+ 779   1          if (!__GET_FLAG(ym->comm.flag, ym_step2))
+ 780   1          {
+ 781   2              ymodem_putchar(YM_ACK);
+ 782   2              ymodem_putchar(YM_PUT_C);
+ 783   2              __SET_FLAG(ym->comm.flag, ym_step2);
+ 784   2              memset(&ym->comm.count, 0x00, sizeof(ym->comm) - sizeof(ym->comm.flag));
+ 785   2          }
+ 786   1      
+ 787   1          if (!__GET_FLAG(ym->comm.flag, ym_step3) && ym->comm.count < _ym_recv_counts)
+ 788   1          {
+ 789   2              ym->comm.len += ringbuffer_gets((struct ringbuffer *)ym->rb, (ym->buf + ym->comm.len),
+ 790   2                                              RE_PACKET_128B_SIZE - ym->comm.len);
+ 791   2              if (RE_PACKET_128B_SIZE == ym->comm.len)
+ 792   2              {
+C51 COMPILER V9.60.0.0   YMODEM                                                            01/15/2023 15:54:13 PAGE 14  
+
+ 793   3                  __SET_FLAG(ym->comm.flag, ym_step3);
+ 794   3              }
+ 795   2      
+ 796   2              ym->comm.count++;
+ 797   2          }
+ 798   1      
+ 799   1          if (!__GET_FLAG(ym->comm.flag, ym_step3))
+ 800   1          {
+ 801   2              if (_ym_recv_counts == ym->comm.count)
+ 802   2                  return ym_rec_timeout;
+ 803   2      
+ 804   2              return ym_next;
+ 805   2          }
+ 806   1      
+ 807   1          ymodem_putchar(YM_ACK); // 最后一次应答
+ 808   1      
+ 809   1          memset(&ym->comm, 0x00, sizeof(ym->comm));
+ 810   1          ym->cur_state = ym->next_state = ym_wait;
+ 811   1      
+ 812   1          if (ymodem_on_end(ym) != ym_next)
+ 813   1              return ym_err_other;
+ 814   1      
+ 815   1          return ym_ok;
+ 816   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   3998    ----
+   CONSTANT SIZE    =    435    ----
+   XDATA SIZE       =   1099      95
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

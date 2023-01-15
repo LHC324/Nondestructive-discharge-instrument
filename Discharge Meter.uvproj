@@ -707,6 +707,21 @@
               <FileType>1</FileType>
               <FilePath>.\Src\utils_ringbuffer.c</FilePath>
             </File>
+            <File>
+              <FileName>ymodem.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Src\ymodem.c</FilePath>
+            </File>
+            <File>
+              <FileName>w25qx.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Src\w25qx.c</FilePath>
+            </File>
+            <File>
+              <FileName>spi.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Src\spi.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

@@ -2,6 +2,8 @@
 #include "GPIO.h"
 #include "timer.h"
 #include "usart.h"
+#include "spi.h"
+#include "w25qx.h"
 // #include "charger.h"
 #include "discharger.h"
 #include "dwin.h"
@@ -13,6 +15,7 @@
 void HardDefault(uint8_t channel, uint8_t error);
 #endif
 
+#define SYS_SOFT_VERSION "1.5.5"
 #if !defined(USING_RTOS)
 // void Event_Init(TIMERS *ptimer);
 // static void Event_Polling(void);
@@ -72,6 +75,10 @@ void assert_handler(const char *ex_string, const char *func, size_t line)
 
 void main(void)
 {
+#if (USING_DEBUG)
+    uint32_t jedec_id;
+    uint8_t *id = &jedec_id, regs[] = {0, 0};
+#endif
     uint16_t Crc = 0;
     Storage_TypeDef *ps = &discharger.Storage;
     // pModbusHandle pm = &Modbus_Object;
@@ -128,6 +135,14 @@ void main(void)
     // /*上报后台参数*/
     // Dwin_Write(&Dwin_Objct, SLAVE_ID_ADDR, (uint8_t *)&(discharger.Storage),
     //            GET_PARAM_SITE(Storage_TypeDef, flag, uint8_t));
+
+#if (USING_DEBUG)
+    jedec_id = dev_flash_read_jedec_id();
+    regs[0] = dev_flash_read_sr(FLASH_READ_SR1_CMD);
+    regs[1] = dev_flash_read_sr(FLASH_READ_SR2_CMD);
+    Uartx_Printf(&Uart2, "\r\nsystem vesrsion:%s\r\nJEDEC: %#bx  %#bx  %#bx\r\nregs(1~0): %#bx  %#bx\r\n",
+                 SYS_SOFT_VERSION, id[1], id[2], id[3], regs[1], regs[0]);
+#endif
 
     while (1)
     {
@@ -245,12 +260,22 @@ void Uartx_Parser(void)
 #if (DWIN_USING_RB)
         if (UART4 == puart->Instance)
         {
-            IE2 &= ~ES4;
+            // IE2 &= ~ES4;
             Dwin_Object.Slave.rb->size = (puart->Rx.rx_size - 1U);
             Dwin_Object.Slave.rb->buf = puart->Rx.pbuf;
             // ringbuffer_put(Dwin_Object.Slave.rb, puart->Rx.pbuf, puart->Rx.rx_count);
             Dwin_Poll(&Dwin_Object);
-            IE2 |= ES4;
+            // IE2 |= ES4;
+        }
+#endif
+#if (USIING_OTA)
+        if (UART2 == puart->Instance)
+        {
+            // IE2 &= ~ES2;
+            Modbus_Object.Slave.rb->buf = puart->Rx.pbuf;
+            Modbus_Object.Slave.rb->size = puart->Rx.rx_size - 1U;
+            Modbus_Object.Mod_Poll(&Modbus_Object);
+            // IE2 |= ES2;
         }
 #endif
         if (__GET_FLAG(puart->Rx.flag, Finish_Flag))
@@ -270,6 +295,8 @@ void Uartx_Parser(void)
 #endif
             case UART2:
             {
+                if (Modbus_Object.Ota_Flag)
+                    return;
                 IE2 &= ~ES2;
                 Modbus_Object.Slave.pRbuf = puart->Rx.pbuf;
                 Modbus_Object.Slave.RxCount = puart->Rx.rx_count;
@@ -487,13 +514,25 @@ void Gpio_Init(void)
 #define W25QX_CLK GPIO_Pin_5
 #define W25QX_PORT GPIO_P2
 
+        SPIInit_Type spi = {
+            SPI_Type_Master,
+            SPI_SCLK_DIV_16,
+            SPI_Mode_0,
+            SPI_Tran_MSB,
+            true,
+        };
+
         GPIO_InitStruct.Mode = GPIO_OUT_PP;
-        GPIO_InitStruct.Pin = W25QX_NSS | W25QX_CLK;
+        GPIO_InitStruct.Pin = W25QX_NSS | W25QX_CLK | W25QX_MOSI;
         GPIO_Inilize(W25QX_PORT, &GPIO_InitStruct);
 
         GPIO_InitStruct.Mode = GPIO_HighZ;
-        GPIO_InitStruct.Pin = W25QX_MOSI | W25QX_MISO;
+        GPIO_InitStruct.Pin = W25QX_MISO;
         GPIO_Inilize(W25QX_PORT, &GPIO_InitStruct);
+
+        GPIO_spi_sw_port(SW_Port2);
+        // NVIC_spi_init(NVIC_PR3, true);
+        spi_init(&spi);
     }
 
 #define USING_LTE______________________________________

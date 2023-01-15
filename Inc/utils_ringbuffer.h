@@ -136,6 +136,7 @@ extern "C"
 	 * \return The number of elements in ring buffer [0, rb->size]
 	 */
 	uint16_t ringbuffer_num(const struct ringbuffer *const rb);
+#define fingbuffer_get_num(_rb) (_rb->write_index - _rb->read_index)
 
 	/**
 	 * \brief Flush ring buffer, the user needs to handle the concurrent access on buffer
@@ -146,6 +147,7 @@ extern "C"
 	 * \return ERR_NONE on success, or an error code on failure.
 	 */
 	uint16_t ringbuffer_flush(struct ringbuffer *const rb);
+#define ringbuffer_clean(_rb) (_rb->read_index = _rb->write_index)
 
 	/**@}*/
 

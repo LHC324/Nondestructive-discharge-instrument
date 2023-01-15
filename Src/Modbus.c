@@ -11,6 +11,9 @@
 #include "discharger.h"
 #include "Dwin.h"
 #include "eeprom.h"
+#if (USIING_OTA)
+#include "ymodem.h"
+#endif
 
 /*使用屏幕接收处理时*/
 #define TYPEDEF_STRUCT uint8_t
@@ -40,9 +43,21 @@ static void Modus_ReportSeverId(pModbusHandle pd);
 static void Modbus_CallBack(pModbusHandle pd);
 
 static uint8_t mtx_buf[128];
+#if (USIING_OTA)
+struct ringbuffer modbus_rb = {
+    NULL,
+    0,
+    0,
+    0,
+};
+// static uint8_t modbus_rx_buf[1032];
+#endif
 /*定义Modbus对象*/
 ModbusHandle Modbus_Object = {
     0x02,
+#if (USIING_OTA)
+    false,
+#endif
     Modbus_Poll,
     Modbus_Send,
     Modbus_46H,
@@ -56,7 +71,11 @@ ModbusHandle Modbus_Object = {
 #endif
     // Modus_ReportSeverId,
     {mtx_buf, sizeof(mtx_buf), 0},
-    {NULL, 0, &discharger.Storage, InputCoil, &Spool, Read},
+#if (!MODBUS_USING_RB)
+    {NULL, 0, &modbus_rb, &discharger.Storage, InputCoil, &Spool, Read},
+#else
+    {&modbus_rb, NULL, &discharger.Storage, InputCoil, &Spool, Read},
+#endif
     &Uart2,
 };
 
@@ -83,6 +102,8 @@ void Modbus_Handle(void)
 
 #define MOD_WORD 1U
 #define MOD_DWORD 2U
+#if (!MODBUS_USING_RB)
+#define md_rx_ptr(__ptr) ((__ptr)->Slave.pRbuf)
 /*获取主机号*/
 #define Get_ModId(__obj) ((__obj)->Slave.pRbuf[0U])
 /*获取Modbus功能号*/
@@ -92,6 +113,14 @@ void Modbus_Handle(void)
     ((__size) < 2U ? ((uint16_t)((__ptr)->Slave.pRbuf[__s] << 8U) | ((__ptr)->Slave.pRbuf[__s + 1U]))          \
                    : ((uint32_t)((__ptr)->Slave.pRbuf[__s] << 24U) | ((__ptr)->Slave.pRbuf[__s + 1U] << 16U) | \
                       ((__ptr)->Slave.pRbuf[__s + 2U] << 8U) | ((__ptr)->Slave.pRbuf[__s + 3U])))
+#else
+#define md_rx_ptr(__ptr) ((__ptr)->Slave.pdat)
+#define Get_ModId(__ptr) (__ptr[0U])
+#define Get_Data(__buf, __s, __size)                                             \
+    ((__size) < 2U ? ((uint16_t)(__buf[__s] << 8U) | (__buf[__s + 1U]))          \
+                   : ((uint32_t)(__buf[__s] << 24U) | (__buf[__s + 1U] << 16U) | \
+                      (__buf[__s + 2U] << 8U) | (__buf[__s + 3U])))
+#endif
 
 /**
  * @brief  Modbus从机响应回调
@@ -160,6 +189,7 @@ static void Modbus_CallBack(pModbusHandle pd)
     }
 }
 
+#if (USIING_OTA)
 /**
  * @brief  modbus协议栈进行ota升级
  * @param  pd modbus协议站句柄
@@ -167,11 +197,24 @@ static void Modbus_CallBack(pModbusHandle pd)
  */
 static void lhc_ota_update(pModbusHandle pd)
 {
+    char ret;
     uint8_t ota_value = OTA_FLAG_VALUE;
-    pd = pd;
+    // pd = pd;
 
-    IapWrites(OTA_FLAG_ADDR, &ota_value, sizeof(ota_value)); // 写入ota标志
-    IAP_CONTR = 0x60;                                        // 复位单片机
+    // IapWrites(OTA_FLAG_ADDR, &ota_value, sizeof(ota_value)); // 写入ota标志
+    // IAP_CONTR = 0x60;                                        // 复位单片机
+
+    // ret < 0:失败 / =0:成功 / > 0：等待
+    ret = Ota_Menue(pd->Slave.rb);
+    /*升级失败:退出ota模式，进入modbus模式*/
+    if (ret <= 0)
+        pd->Ota_Flag = false;
+
+    if (!ret) // 应用程序后台升级成功
+    {
+        // IapWrites(OTA_FLAG_ADDR, &ota_value, sizeof(ota_value)); // 写入ota标志
+        IAP_CONTR = 0x60; // 复位单片机
+    }
 }
 
 /**
@@ -190,6 +233,7 @@ static bool lhc_check_is_ota(pModbusHandle pd)
              (pd->Slave.pRbuf[0] == ENTER_OTA_MODE_CODE)));
 #undef ENTER_OTA_MODE_CODE
 }
+#endif
 
 /**
  * @brief  Modbus接收数据解析
@@ -199,84 +243,112 @@ static bool lhc_check_is_ota(pModbusHandle pd)
 static void Modbus_Poll(pModbusHandle pd)
 {
     uint16_t crc16 = 0;
+#if (!MODBUS_USING_RB)
+    uint32_t len = 0;
 
+    if (NULL == pd || NULL == pd->Slave.pRbuf)
+        return;
+
+#if (USIING_OTA)
     /*检查是否进入OTA升级*/
-    if (lhc_check_is_ota(pd))
+
+    if (!pd->Ota_Flag)
+    {
+        if (lhc_check_is_ota(pd))
+        {
+            pd->Ota_Flag = true;
+        }
+    }
+    else
     {
         lhc_ota_update(pd);
+        return;
     }
-#if !defined(USING_FREERTOS)
-    // if (pd->Slave.Recive_FinishFlag)
+#endif
+    if (!pd->Slave.RxCount)
+        return;
+#else
+    if (NULL == pd || NULL == pd->Slave.rb ||
+        NULL == pd->Slave.rb->buf || !ringbuffer_num(pd->Slave.rb)) // 无数据，直接退出
+        return;
+#endif
+
+#if (!MODBUS_USING_RB)
+    /*首次调度时RXcount值被清零，导致计算crc时地址越界*/
+    if (pd->Slave.RxCount > 2U)
+        crc16 = Get_Crc16(pd->Slave.pRbuf, pd->Slave.RxCount - 2U, 0xffff);
+#if defined(USING_DEBUG)
+        // Debug("rxcount = %d,crc16 = 0x%X.\r\n", pd->Slave.RxCount, (uint16_t)((crc16 >> 8U) | (crc16 << 8U)));
+#endif
+    crc16 = (crc16 >> 8U) | (crc16 << 8U);
+    /*检查是否是目标从站*/
+    if ((Get_ModId(pd) == pd->Slave_Id) &&
+        (Get_Data(pd, pd->Slave.RxCount - 2U, MOD_WORD) == crc16))
+#else
+
+    len = ringbuffer_gets(pd->Slave.rb, modbus_rx_buf, 1U);
+
+    if ((1U != len) && (Get_ModId(modbus_rx_buf) != pd->Slave_Id))
+        return;
+
+#endif
     {
-        // pd->Slave.Recive_FinishFlag = false;
-#endif /*首次调度时RXcount值被清零，导致计算crc时地址越界*/
-        if (pd->Slave.RxCount > 2U)
-            crc16 = Get_Crc16(pd->Slave.pRbuf, pd->Slave.RxCount - 2U, 0xffff);
 #if defined(USING_DEBUG)
-            // Debug("rxcount = %d,crc16 = 0x%X.\r\n", pd->Slave.RxCount, (uint16_t)((crc16 >> 8U) | (crc16 << 8U)));
+        // Debug("Data received!\r\n");
+        // for (uint8_t i = 0; i < pd->Slave.RxCount; i++)
+        // {
+        //     Debug("prbuf[%d] = 0x%X\r\n", i, pd->Slave.pRbuf[i]);
+        // }
 #endif
-        crc16 = (crc16 >> 8U) | (crc16 << 8U);
-        /*检查是否是目标从站*/
-        if ((Get_ModId(pd) == pd->Slave_Id) &&
-            (Get_Data(pd, pd->Slave.RxCount - 2U, MOD_WORD) == crc16))
+        switch (Get_ModFunCode(pd))
         {
-#if defined(USING_DEBUG)
-            // Debug("Data received!\r\n");
-            // for (uint8_t i = 0; i < pd->Slave.RxCount; i++)
-            // {
-            //     Debug("prbuf[%d] = 0x%X\r\n", i, pd->Slave.pRbuf[i]);
-            // }
-#endif
-            switch (Get_ModFunCode(pd))
-            {
 #if defined(USING_COIL) || defined(USING_INPUT_COIL)
-            case ReadCoil:
-            case ReadInputCoil:
-            {
-                pd->Mod_ReadXCoil(pd);
-            }
-            break;
-            case WriteCoil:
-            case WriteCoils:
-            {
-                pd->Mod_WriteCoil(pd);
-                pd->Mod_CallBack(pd);
-            }
-            break;
+        case ReadCoil:
+        case ReadInputCoil:
+        {
+            pd->Mod_ReadXCoil(pd);
+        }
+        break;
+        case WriteCoil:
+        case WriteCoils:
+        {
+            pd->Mod_WriteCoil(pd);
+            pd->Mod_CallBack(pd);
+        }
+        break;
 #endif
 #if defined(USING_INPUT_REGISTER) || defined(USING_HOLD_REGISTER)
-            case ReadHoldReg:
-            case ReadInputReg:
-            {
-                pd->Mod_ReadXRegister(pd);
-            }
-            break;
-            case WriteHoldReg:
-            case WriteHoldRegs:
-            {
-                pd->Mod_WriteHoldRegister(pd);
-                pd->Mod_CallBack(pd);
-            }
-            break;
+        case ReadHoldReg:
+        case ReadInputReg:
+        {
+            pd->Mod_ReadXRegister(pd);
+        }
+        break;
+        case WriteHoldReg:
+        case WriteHoldRegs:
+        {
+            pd->Mod_WriteHoldRegister(pd);
+            pd->Mod_CallBack(pd);
+        }
+        break;
 #endif
-            case ReportSeverId:
+        case ReportSeverId:
+        {
+            //                pd->Mod_ReportSeverId(pd);
+            /**/
+            if (pd->Slave.pHandle)
             {
-                //                pd->Mod_ReportSeverId(pd);
-                /**/
-                if (pd->Slave.pHandle)
-                {
-                    *(TYPEDEF_STRUCT *)pd->Slave.pHandle = true;
-                }
-            }
-            break;
-            default:
-                break;
+                *(TYPEDEF_STRUCT *)pd->Slave.pHandle = true;
             }
         }
-        memset(pd->Slave.pRbuf, 0x00, pd->Slave.RxCount);
-        pd->Slave.RxCount = 0U;
-#if !defined(USING_FREERTOS)
+        break;
+        default:
+            break;
+        }
     }
+#if (!MODBUS_USING_RB)
+    memset(pd->Slave.pRbuf, 0x00, pd->Slave.RxCount);
+    pd->Slave.RxCount = 0U;
 #endif
 }
 
@@ -390,7 +462,8 @@ static void Modus_ReadXCoil(pModbusHandle pd)
 {
 #define Byte_To_Bits 8U
     uint8_t len = Get_Data(pd, 4U, MOD_WORD);
-    uint8_t bytes = len / Byte_To_Bits + !!(len % Byte_To_Bits);
+    // uint8_t bytes = len / Byte_To_Bits + !!(len % Byte_To_Bits);
+    uint8_t bytes = (len >> 3U) + !!(len & (Byte_To_Bits - 1U));
     uint8_t buf[REG_POOL_SIZE * 2U], *prbits = &buf;
     uint8_t i = 0, j = 0;
     // uint8_t bits = 0x00;

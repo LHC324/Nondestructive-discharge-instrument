@@ -7,7 +7,10 @@
 ".\Objects\eeprom.obj",
 ".\Objects\discharger.obj",
 ".\Objects\Modbus.obj",
-".\Objects\utils_ringbuffer.obj" 
+".\Objects\utils_ringbuffer.obj",
+".\Objects\ymodem.obj",
+".\Objects\w25qx.obj",
+".\Objects\spi.obj" 
 TO ".\Objects\Discharge_Meter" 
 
 PRINT(".\Listings\Discharge_Meter.map")

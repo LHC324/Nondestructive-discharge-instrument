@@ -26,7 +26,10 @@
         "STDDEF.H": "cpp",
         "modbus.h": "c",
         "ringbuffer.h": "c",
-        "utils_ringbuffer.h": "c"
+        "utils_ringbuffer.h": "c",
+        "ymodem.h": "c",
+        "w25qx.h": "c",
+        "spi.h": "c"
     },
     "C_Cpp.errorSquiggles": "disabled"
 }

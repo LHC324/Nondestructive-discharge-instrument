@@ -1,0 +1,765 @@
+C51 COMPILER V9.60.0.0   W25QX                                                             01/15/2023 15:54:13 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE W25QX
+OBJECT MODULE PLACED IN .\Objects\w25qx.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE Src\w25qx.c LARGE OMF2 OPTIMIZE(9,SPEED) BROWSE INCDIR(.\Inc;.\SmallRTOS
+                    -\Inc) DEBUG PRINT(.\Listings\w25qx.lst) OBJECT(.\Objects\w25qx.obj)
+
+line level    source
+
+   1          /********************************** (C) COPYRIGHT *******************************
+   2           * File Name          : dev_flash.c
+   3           * Author             : XZH
+   4           * Version            : V1.00
+   5           * Date               : 2020/07/20
+   6           * Description        : w25qxx驱动
+   7           *
+   8           *
+   9           *******************************************************************************/
+  10          
+  11          /*******************************************************************************/
+  12          /* Include */
+  13          #include "w25qx.h"
+  14          #include "spi.h"
+  15          #include "usart.h"
+  16          /*******************************************************************************/
+  17          
+  18          #if (!USING_DEBUG && W25Qx_USING_DEBUG)
+              #error Global debugging mode is not turned on!
+              #endif
+  21          
+  22          #define SPI_TX_TIMEOUT 200 // 400
+  23          #define SPI_RX_TIMEOUT 200 // 1000
+  24          
+  25          /*******************************************************************************/
+  26          /* Variables */
+  27          /*******************************************************************************/
+  28          
+  29          /*******************************************************************************/
+  30          /* Globle Variate */
+  31          /******************************************************************************/
+  32          
+  33          /******************************************************************************/
+  34          /* Static Function  */
+  35          
+  36          /*******************************************************************************
+  37           * Function Name  : dev_flash_delay
+  38           * Description    : flash驱动使用的delay
+  39           *                  平台适配
+  40           *
+  41           * Input          : delay_time 延迟时间 注意最大只能8位这里设置了
+  42           *
+  43           *
+  44           * Output         : None
+  45           * Return         : None
+  46           *******************************************************************************/
+  47          static void dev_flash_delay(uint8_t delay_time)
+  48          {
+  49   1          unsigned char i, j;
+  50   1      
+  51   1          i = 4U * delay_time; //@24.000MHz
+  52   1          j = 225U;
+  53   1          do
+  54   1          {
+C51 COMPILER V9.60.0.0   W25QX                                                             01/15/2023 15:54:13 PAGE 2   
+
+  55   2              while (--j)
+  56   2                  ;
+  57   2          } while (--i);
+  58   1      }
+  59          
+  60          /*******************************************************************************
+  61           * Function Name  : dev_flash_read_write_byte
+  62           * Description    : 全双工读写函数 平台适配
+  63           *                  平台适配
+  64           *
+  65           * Input          : tx_data 8位数据 这里注意适配一下retry超时时间，不能太短，否则�
+             -�直接跳出导致数据错误
+  66           *
+  67           *
+  68           * Output         : None
+  69           * Return         : None
+  70           *******************************************************************************/
+  71          static uint8_t dev_flash_read_write_byte(bit rx_en, uint8_t tx_data)
+  72          {
+  73   1          spi_send_data(tx_data, SPI_TX_TIMEOUT);
+  74   1      
+  75   1          if (rx_en)
+  76   1              return spi_receive_data(SPI_RX_TIMEOUT);
+  77   1      
+  78   1          return 0xFF;
+  79   1      }
+  80          
+  81          /*******************************************************************************
+  82           * Function Name  : dev_flash_send_bytes
+  83           * Description    : 发送多个数据
+  84           *
+  85           *
+  86           * Input          : pdata 数据指针
+  87           *                  send_length  16位数据长度
+  88           *
+  89           * Output         : None
+  90           * Return         : None
+  91           *******************************************************************************/
+  92          static void dev_flash_send_bytes(uint8_t *pdat, uint16_t len)
+  93          {
+  94   1          while (len--)
+  95   1          {
+  96   2              dev_flash_read_write_byte(false, *pdat++);
+  97   2          }
+  98   1      }
+  99          
+ 100          /*******************************************************************************
+ 101           * Function Name  : dev_flash_recv_bytes
+ 102           * Description    : spi读取多次数据 这里发送没用数据0xff用于给时钟
+ 103           *
+ 104           *
+ 105           * Input          : recv_length  16位数据长度
+ 106           *
+ 107           *
+ 108           * Output         : pdata 读取到buf的数据指针
+ 109           * Return         : None
+ 110           *******************************************************************************/
+ 111          static void dev_flash_recv_bytes(uint8_t *pdat, uint16_t len)
+ 112          {
+ 113   1          while (len--)
+ 114   1          {
+ 115   2              *pdat++ = dev_flash_read_write_byte(true, 0xff);
+C51 COMPILER V9.60.0.0   W25QX                                                             01/15/2023 15:54:13 PAGE 3   
+
+ 116   2          }
+ 117   1      }
+ 118          
+ 119          /*******************************************************************************
+ 120           * Function Name  : dev_flash_write_enable
+ 121           * Description    : 写数据之前必须发写使能
+ 122           *
+ 123           *
+ 124           * Input          : None
+ 125           *
+ 126           *
+ 127           * Output         : None
+ 128           * Return         : None
+ 129           *******************************************************************************/
+ 130          static void dev_flash_write_enable(void)
+ 131          {
+ 132   1          FLASH_CS_LOW;
+ 133   1      
+ 134   1          dev_flash_read_write_byte(false, FLASH_WRITE_ENABLE_CMD);
+ 135   1      
+ 136   1          FLASH_CS_HIGH;
+ 137   1      }
+ 138          
+ 139          /*******************************************************************************
+ 140           * Function Name  : dev_flash_write_disable
+ 141           * Description    : 写失能
+ 142           *
+ 143           *
+ 144           * Input          : None
+ 145           *
+ 146           *
+ 147           * Output         : None
+ 148           * Return         : None
+ 149           *******************************************************************************/
+ 150          static void dev_flash_write_disable(void)
+ 151          {
+ 152   1          FLASH_CS_LOW;
+ 153   1      
+ 154   1          dev_flash_read_write_byte(false, FLASH_WRITE_ENABLE_CMD);
+ 155   1      
+ 156   1          FLASH_CS_HIGH;
+ 157   1      }
+ 158          
+ 159          /*******************************************************************************
+ 160           * Function Name  : dev_flash_read_sr
+ 161           * Description    : 读状态寄存器
+ 162           *
+ 163           *
+ 164           * Input          : None
+ 165           *
+ 166           *
+ 167           * Output         : None
+ 168           * Return         : 8位状态寄存器
+ 169           *******************************************************************************/
+ 170          uint8_t dev_flash_read_sr(uint8_t regs)
+ 171          {
+ 172   1          uint8_t temp;
+ 173   1      
+ 174   1          if ((regs != FLASH_READ_SR1_CMD) && (regs != FLASH_READ_SR2_CMD))
+ 175   1              return 0xFF;
+ 176   1      
+ 177   1          FLASH_CS_LOW;
+C51 COMPILER V9.60.0.0   W25QX                                                             01/15/2023 15:54:13 PAGE 4   
+
+ 178   1      
+ 179   1          dev_flash_read_write_byte(false, regs);
+ 180   1          temp = dev_flash_read_write_byte(true, 0xff);
+ 181   1      
+ 182   1          FLASH_CS_HIGH;
+ 183   1      
+ 184   1          return temp;
+ 185   1      }
+ 186          
+ 187          /*******************************************************************************
+ 188           * Function Name  : dev_flash_write_sr
+ 189           * Description    : 写状态寄存器
+ 190           *
+ 191           *
+ 192           * Input          : sr 8位状态寄存器
+ 193           *
+ 194           *
+ 195           * Output         : None
+ 196           * Return         :
+ 197           *******************************************************************************/
+ 198          static void dev_flash_write_sr(uint8_t sr)
+ 199          {
+ 200   1          dev_flash_write_enable();
+ 201   1      
+ 202   1          FLASH_CS_LOW;
+ 203   1      
+ 204   1          dev_flash_read_write_byte(false, FLASH_WRITE_SR_CMD);
+ 205   1          dev_flash_read_write_byte(false, sr);
+ 206   1      
+ 207   1          FLASH_CS_HIGH;
+ 208   1      
+ 209   1          // dev_flash_write_disable();
+ 210   1      }
+ 211          
+ 212          /*******************************************************************************
+ 213           * Function Name  : dev_flash_wait_nobusy
+ 214           * Description    : Flash操作是否处于忙状态，判断之前的工作是否完成
+ 215           *
+ 216           *
+ 217           * Input          : None
+ 218           *
+ 219           *
+ 220           * Output         : None
+ 221           * Return         : 8位状态寄存器
+ 222           *******************************************************************************/
+ 223          static void dev_flash_wait_nobusy(void)
+ 224          {
+ 225   1          while ((dev_flash_read_sr(FLASH_READ_SR1_CMD) & 0x01))
+ 226   1              dev_flash_delay(2); // 必须做一下延迟
+ 227   1      }
+ 228          
+ 229          /******************************************************************************/
+ 230          
+ 231          /******************************************************************************/
+ 232          /* Extern Function */
+ 233          
+ 234          /*******************************************************************************
+ 235           * Function Name  : dev_flash_read_device_id
+ 236           * Description    : 读取 deviceid
+ 237           *
+ 238           *
+ 239           * Input          : None
+C51 COMPILER V9.60.0.0   W25QX                                                             01/15/2023 15:54:13 PAGE 5   
+
+ 240           *
+ 241           *
+ 242           * Output         : None
+ 243           * Return         : 16位deviec_id 0xxx13 代表25q80这种8M的 0xxx14代表16M 0xxx15代表 32M 0xxx16�
+             -�表 64M的 前面1字节看生产厂商
+ 244           *******************************************************************************/
+ 245          uint16_t dev_flash_read_device_id(void)
+ 246          {
+ 247   1          uint16_t dat = 0;
+ 248   1          uint8_t cmd[] = {FLASH_READ_DEVICE_ID, 0x00, 0x00, 0x00};
+ 249   1      
+ 250   1          FLASH_CS_LOW;
+ 251   1      
+ 252   1          /* Send "RDID " instruction */
+ 253   1          dev_flash_send_bytes(cmd, sizeof(cmd) / sizeof(cmd[0]));
+ 254   1      
+ 255   1          /* Read a byte from the FLASH */
+ 256   1          dat |= (uint16_t)dev_flash_read_write_byte(true, 0xff) << 8;
+ 257   1          /* Read a byte from the FLASH */
+ 258   1          dat |= dev_flash_read_write_byte(true, 0xff);
+ 259   1      
+ 260   1          FLASH_CS_HIGH;
+ 261   1      
+ 262   1          return (dat);
+ 263   1      }
+ 264          
+ 265          /*******************************************************************************
+ 266           * Function Name  : dev_flash_read_jedec_id
+ 267           * Description    : 读取 jedec id
+ 268           *
+ 269           *
+ 270           * Input          : None
+ 271           *
+ 272           *
+ 273           * Output         : None
+ 274           * Return         : 32位jedec id 前2字节为0x00
+ 275           *******************************************************************************/
+ 276          uint32_t dev_flash_read_jedec_id(void)
+ 277          {
+ 278   1          uint32_t dat = 0;
+ 279   1      
+ 280   1          FLASH_CS_LOW;
+ 281   1      
+ 282   1          dev_flash_read_write_byte(false, FLASH_READ_JEDEC_ID);
+ 283   1      
+ 284   1          dat = (uint32_t)dev_flash_read_write_byte(true, 0xff) << 16;
+ 285   1      
+ 286   1          dat |= (uint32_t)dev_flash_read_write_byte(true, 0xff) << 8;
+ 287   1      
+ 288   1          dat |= dev_flash_read_write_byte(true, 0xff);
+ 289   1      
+ 290   1          FLASH_CS_HIGH;
+ 291   1      
+ 292   1          return (dat);
+ 293   1      }
+ 294          
+ 295          /*******************************************************************************
+ 296           * Function Name  : dev_flash_read_bytes
+ 297           * Description    : 读取数据
+ 298           *
+ 299           *
+ 300           * Input          : addr 读取地址
+C51 COMPILER V9.60.0.0   W25QX                                                             01/15/2023 15:54:13 PAGE 6   
+
+ 301           *                  read_length 读取长度
+ 302           *
+ 303           * Output         : pdata 读取到的buf指针
+ 304           * Return         : None
+ 305           *******************************************************************************/
+ 306          void dev_flash_read_bytes(uint8_t *pdat, uint32_t addr, uint16_t read_length)
+ 307          {
+ 308   1          uint8_t cmd[] = {FLASH_READ_DATA, 0, 0, 0};
+ 309   1      
+ 310   1          cmd[1] = (uint8_t)(addr >> 16);
+ 311   1          cmd[2] = (uint8_t)(addr >> 8);
+ 312   1          cmd[3] = (uint8_t)(addr >> 0);
+ 313   1      
+ 314   1          FLASH_CS_LOW;
+ 315   1      
+ 316   1          dev_flash_send_bytes(cmd, sizeof(cmd) / sizeof(cmd[0]));
+ 317   1      
+ 318   1          dev_flash_recv_bytes(pdat, read_length);
+ 319   1      
+ 320   1          FLASH_CS_HIGH;
+ 321   1      }
+ 322          
+ 323          /*******************************************************************************
+ 324          * Function Name  : dev_flash_write_page
+ 325          * Description    : 写一页 最多256字节 注意这里别越扇区了！！！不会自己检查
+ 326          *
+ 327          *
+ 328          * Input          : pdata 数据
+ 329          *                  addr  写入地址
+ 330          *                  write_length 写入长度
+ 331          
+ 332          * Output         : None
+ 333          * Return         : None
+ 334          *******************************************************************************/
+ 335          void dev_flash_write_page(uint8_t *pdat, uint32_t write_addr, uint16_t write_length)
+ 336          {
+ 337   1          uint8_t cmd[] = {FLASH_WRITE_PAGE, 0, 0, 0};
+ 338   1      
+ 339   1          cmd[1] = (uint8_t)(write_addr >> 16);
+ 340   1          cmd[2] = (uint8_t)(write_addr >> 8);
+ 341   1          cmd[3] = (uint8_t)(write_addr >> 0);
+ 342   1      
+ 343   1          dev_flash_write_enable();
+ 344   1      
+ 345   1          FLASH_CS_LOW;
+ 346   1      
+ 347   1          dev_flash_send_bytes(cmd, sizeof(cmd) / sizeof(cmd[0]));
+ 348   1      
+ 349   1          dev_flash_send_bytes(pdat, write_length);
+ 350   1      
+ 351   1          FLASH_CS_HIGH;
+ 352   1      
+ 353   1          dev_flash_wait_nobusy();
+ 354   1      
+ 355   1          // dev_flash_write_disable();
+ 356   1      }
+ 357          
+ 358          extern void display_hex_data(uint8_t *dat, uint32_t len);
+ 359          /*******************************************************************************
+ 360          * Function Name  : dev_flash_write_bytes_nocheck
+ 361          * Description    : 写数据 自动查询当前地址 自动越扇区写入 注意这里只能写擦除过
+             -的
+C51 COMPILER V9.60.0.0   W25QX                                                             01/15/2023 15:54:13 PAGE 7   
+
+ 362          *
+ 363          *
+ 364          * Input          : pdata 数据
+ 365          *                  write_addr  写入地址
+ 366          *                  write_length 写入长度
+ 367          
+ 368          * Output         : None
+ 369          * Return         : None
+ 370          *******************************************************************************/
+ 371          void dev_flash_write_bytes_nocheck(uint8_t *pdat,
+ 372                                             uint32_t write_addr,
+ 373                                             uint16_t write_length)
+ 374          {
+ 375   1          uint16_t PageByte = DEV_FLASH_PAGE_SIZE - (write_addr & (DEV_FLASH_PAGE_SIZE - 1U)); // 单页剩余�
+             -�字节数
+ 376   1          // uint16_t PageByte = DEV_FLASH_PAGE_SIZE - write_addr % DEV_FLASH_PAGE_SIZE; // 单页剩余的字�
+             -�数
+ 377   1      
+ 378   1          if (write_length < PageByte)
+ 379   1          {
+ 380   2              PageByte = write_length;
+ 381   2          }
+ 382   1      #if (W25Qx_USING_DEBUG)
+                  Uartx_Printf(W25Qx_UART, "\r\npage byte\taddr\t\tlen\r\n");
+              #endif
+ 385   1          while (1)
+ 386   1          {
+ 387   2      #if (W25Qx_USING_DEBUG)
+                      uint8_t buf[DEV_FLASH_PAGE_SIZE];
+                      Uartx_Printf(W25Qx_UART, "%d\t%#X\t\t%#X\r\n", PageByte, (uint16_t)write_addr, write_length);
+                      display_hex_data(pdat, PageByte);
+              #endif
+ 392   2              dev_flash_write_page(pdat, write_addr, PageByte);
+ 393   2      #if (W25Qx_USING_DEBUG)
+                      dev_flash_read_bytes(buf, write_addr, PageByte);
+                      display_hex_data(pdat, PageByte);
+              #endif
+ 397   2              if (write_length == PageByte)
+ 398   2                  break;
+ 399   2              else
+ 400   2              {
+ 401   3                  pdat += PageByte;
+ 402   3                  write_addr += PageByte;
+ 403   3                  write_length -= PageByte;
+ 404   3                  if (write_length > DEV_FLASH_PAGE_SIZE)
+ 405   3                  {
+ 406   4                      PageByte = DEV_FLASH_PAGE_SIZE;
+ 407   4                  }
+ 408   3                  else
+ 409   3                  {
+ 410   4                      PageByte = write_length;
+ 411   4                  }
+ 412   3              }
+ 413   2          }
+ 414   1      }
+ 415          
+ 416          /*******************************************************************************
+ 417          * Function Name  : dev_flash_write
+ 418          * Description    : 写数据 自动查询当前地址 自动越扇区写入 注意这里只能写擦除过
+             -的
+ 419          *
+ 420          *
+C51 COMPILER V9.60.0.0   W25QX                                                             01/15/2023 15:54:13 PAGE 8   
+
+ 421          * Input          : pdata 数据
+ 422          *                  write_addr  写入地址
+ 423          *                  write_length 写入长度
+ 424          
+ 425          * Output         : None
+ 426          * Return         : None
+ 427          *******************************************************************************/
+ 428          // static bit dev_flash_check_erase(uint8_t *pbuf,
+ 429          //                                  uint32_t addr,
+ 430          //                                  uint16_t len)
+ 431          // {
+ 432          //     uint8_t *p;
+ 433          
+ 434          //     if (NULL == pbuf)
+ 435          //         return true;
+ 436          
+ 437          //     dev_flash_read_bytes(pbuf, addr, len);
+ 438          
+ 439          //     for (p = pbuf; p < pbuf + len; ++p)
+ 440          //     {
+ 441          //         if (0xFF != *p)
+ 442          //             return true;
+ 443          //     }
+ 444          
+ 445          //     return false;
+ 446          // }
+ 447          
+ 448          /*******************************************************************************
+ 449          * Function Name  : dev_flash_write
+ 450          * Description    : 写数据 自动查询当前地址 自动越扇区写入 注意这里只能写擦除过
+             -的
+ 451          *
+ 452          *
+ 453          * Input          : pdata 数据
+ 454          *                  write_addr  写入地址
+ 455          *                  write_length 写入长度
+ 456          
+ 457          * Output         : None
+ 458          * Return         : None
+ 459          *******************************************************************************/
+ 460          // void dev_flash_write(uint8_t *pdat,
+ 461          //                      uint32_t addr,
+ 462          //                      uint16_t len)
+ 463          // {
+ 464          //     uint8_t buf[DEV_FLASH_PAGE_SIZE];
+ 465          //     uint16_t cur_pages = addr >> 8U;                                                 // addr / DEV_FLAS
+             -H_PAGE_SIZE;                                  // 整数倍页地址
+ 466          //     uint8_t remaind_bytes = DEV_FLASH_PAGE_SIZE - addr & (DEV_FLASH_PAGE_SIZE - 1U); // 单页剩余的
+             -字节数
+ 467          //     uint8_t front_bytes;
+ 468          //     bit aligned_flag = false;
+ 469          
+ 470          //     if (addr >= DEV_FLASH_FLASH_SIZE)
+ 471          //         return;
+ 472          
+ 473          //     if (len < remaind_bytes)
+ 474          //         remaind_bytes = len;
+ 475          
+ 476          //     for (;;)
+ 477          //     {
+ 478          //         if (dev_flash_check_erase(buf, addr, remaind_bytes))
+ 479          //         {
+C51 COMPILER V9.60.0.0   W25QX                                                             01/15/2023 15:54:13 PAGE 9   
+
+ 480          //             front_bytes = addr & (DEV_FLASH_PAGE_SIZE - 1U);
+ 481          //             if (front_bytes) // 非整页对齐数据写入
+ 482          //             {
+ 483          //                 aligned_flag = true;
+ 484          //                 dev_flash_read_bytes(buf, addr - front_bytes, front_bytes);
+ 485          //             }
+ 486          
+ 487          //             dev_flash_erase_page(cur_pages);
+ 488          
+ 489          //             if (aligned_flag)
+ 490          //             {
+ 491          //                 aligned_flag = false;
+ 492          //                 dev_flash_write_page(buf, addr - front_bytes, remaind_bytes);
+ 493          //             }
+ 494          //         }
+ 495          
+ 496          //         dev_flash_write_page(pdat, addr, remaind_bytes);
+ 497          //         if (len == remaind_bytes)
+ 498          //             break;
+ 499          //         else
+ 500          //         {
+ 501          //             pdat += remaind_bytes;
+ 502          //             addr += remaind_bytes;
+ 503          //             len -= remaind_bytes;
+ 504          //             remaind_bytes = len > DEV_FLASH_PAGE_SIZE ? DEV_FLASH_PAGE_SIZE : len;
+ 505          //             cur_pages = addr >> 8U;
+ 506          //         }
+ 507          //     }
+ 508          // }
+ 509          
+ 510          /*******************************************************************************
+ 511          * Function Name  : dev_flash_erase_page
+ 512          * Description    : 擦除一页 256字节
+ 513          *
+ 514          *
+ 515          * Input          : page_num 页码 注意填入的是 地址/256
+ 516          *
+ 517          *
+ 518          
+ 519          * Output         : None
+ 520          * Return         : None
+ 521          *******************************************************************************/
+ 522          // void dev_flash_erase_page(uint32_t start_addr)
+ 523          // {
+ 524          //     // uint32_t pages = page_num << 8U; //*256
+ 525          //     uint8_t buf[] = {FLASH_ERASE_PAGE, 0, 0, 0};
+ 526          
+ 527          //     buf[1] = (uint8_t)(start_addr >> 16);
+ 528          //     buf[2] = (uint8_t)(start_addr >> 8);
+ 529          //     buf[3] = (uint8_t)(start_addr >> 0);
+ 530          
+ 531          //     dev_flash_write_enable();
+ 532          
+ 533          //     FLASH_CS_LOW;
+ 534          
+ 535          //     dev_flash_send_bytes(buf, sizeof(buf) / sizeof(buf[0]));
+ 536          
+ 537          //     FLASH_CS_HIGH;
+ 538          
+ 539          //     dev_flash_wait_nobusy();
+ 540          
+ 541          //     // dev_flash_write_disable();
+C51 COMPILER V9.60.0.0   W25QX                                                             01/15/2023 15:54:13 PAGE 10  
+
+ 542          // }
+ 543          
+ 544          /*******************************************************************************
+ 545          * Function Name  : dev_flash_erase_sector
+ 546          * Description    : 擦除一扇区 4K字节
+ 547          *
+ 548          *
+ 549          * Input          : sector_num 扇区码 注意填入的是 地址/4096
+ 550          *
+ 551          *
+ 552          
+ 553          * Output         : None
+ 554          * Return         : None
+ 555          *******************************************************************************/
+ 556          void dev_flash_erase_sector(uint32_t start_addr)
+ 557          {
+ 558   1          uint8_t buf[] = {FLASH_ERASE_SECTOR, 0, 0, 0};
+ 559   1      
+ 560   1          // sector_num <<= 12U; // 4096;
+ 561   1          buf[1] = (uint8_t)(start_addr >> 16);
+ 562   1          buf[2] = (uint8_t)(start_addr >> 8);
+ 563   1          buf[3] = (uint8_t)(start_addr >> 0);
+ 564   1      
+ 565   1          dev_flash_write_enable();
+ 566   1          dev_flash_wait_nobusy();
+ 567   1      
+ 568   1          FLASH_CS_LOW;
+ 569   1      
+ 570   1          dev_flash_send_bytes(buf, sizeof(buf) / sizeof(buf[0]));
+ 571   1      
+ 572   1          FLASH_CS_HIGH;
+ 573   1      
+ 574   1          dev_flash_wait_nobusy();
+ 575   1      
+ 576   1          // dev_flash_write_disable();
+ 577   1      }
+ 578          
+ 579          /*******************************************************************************
+ 580          * Function Name  : dev_flash_erase_sector
+ 581          * Description    : 擦除一块  64K字节
+ 582          *
+ 583          *
+ 584          * Input          : sector_num 扇区码 注意填入的是 地址/65536
+ 585          *
+ 586          *
+ 587          
+ 588          * Output         : None
+ 589          * Return         : None
+ 590          *******************************************************************************/
+ 591          void dev_flash_erase_block(uint32_t start_addr, uint8_t cmd)
+ 592          {
+ 593   1          uint8_t buf[] = {0, 0, 0, 0};
+ 594   1      
+ 595   1          if (start_addr > DEV_FLASH_FLASH_SIZE)
+ 596   1              return;
+ 597   1          buf[0] = cmd;
+ 598   1          buf[1] = (uint8_t)(start_addr & 0xFF0000 >> 16);
+ 599   1          buf[2] = (uint8_t)(start_addr & 0xFF00 >> 8);
+ 600   1          buf[3] = (uint8_t)(start_addr & 0xFF >> 0);
+ 601   1      
+ 602   1          dev_flash_write_enable();
+ 603   1          dev_flash_wait_nobusy();
+C51 COMPILER V9.60.0.0   W25QX                                                             01/15/2023 15:54:13 PAGE 11  
+
+ 604   1      #if (W25Qx_USING_DEBUG)
+                  Uartx_Printf(W25Qx_UART, "sf1: %#bx.\r\n", dev_flash_read_sr(FLASH_READ_SR1_CMD));
+              #endif
+ 607   1      
+ 608   1          FLASH_CS_LOW;
+ 609   1      
+ 610   1          dev_flash_send_bytes(buf, sizeof(buf) / sizeof(buf[0]));
+ 611   1      
+ 612   1          FLASH_CS_HIGH;
+ 613   1      
+ 614   1          dev_flash_wait_nobusy();
+ 615   1      
+ 616   1          // dev_flash_write_disable();
+ 617   1      }
+ 618          
+ 619          /*******************************************************************************
+ 620          * Function Name  : dev_flash_erase_chip
+ 621          * Description    : 整片擦除
+ 622          *
+ 623          *
+ 624          * Input          : None
+ 625          *
+ 626          *
+ 627          
+ 628          * Output         : None
+ 629          * Return         : None
+ 630          *******************************************************************************/
+ 631          void dev_flash_erase_chip(void)
+ 632          {
+ 633   1      
+ 634   1          dev_flash_write_enable();
+ 635   1      
+ 636   1          FLASH_CS_LOW;
+ 637   1      
+ 638   1          dev_flash_read_write_byte(false, FLASH_ERASE_CHIP);
+ 639   1      
+ 640   1          FLASH_CS_HIGH;
+ 641   1      
+ 642   1          dev_flash_wait_nobusy();
+ 643   1      
+ 644   1          // dev_flash_write_disable();
+ 645   1      }
+ 646          
+ 647          // flash自适应擦除算法：https://www.amobbs.com/thread-5648832-1-1.html
+ 648          /*******************************************************************************
+ 649          * Function Name  : dev_flash_auto_adapt_erase
+ 650          * Description    : 自适应擦除算法(w25Qx系列不存在页擦除指令)
+ 651          *
+ 652          *
+ 653          * Input          : None
+ 654          *
+ 655          *
+ 656          
+ 657          * Output         : None
+ 658          * Return         : None
+ 659          *******************************************************************************/
+ 660          void dev_flash_auto_adapt_erase(uint32_t start_addr, uint32_t len)
+ 661          {
+ 662   1      #define RE_32KB(_s) (_s & (DEV_FLASH_64KB_BLOCK_SIZE - 1U))
+ 663   1      #define RE_4KB(_s) (RE_32KB(_s) & (DEV_FLASH_32KB_BLOCK_SIZE - 1U))
+ 664   1      #define RE_256B(_s) (RE_4KB(_s) & (DEV_FLASH_SECTOR_SIZE - 1U))
+ 665   1      
+C51 COMPILER V9.60.0.0   W25QX                                                             01/15/2023 15:54:13 PAGE 12  
+
+ 666   1          uint8_t need_64kb_block = len >> 16U;
+ 667   1          uint8_t need_32kb_block = RE_32KB(len) >> 15U;
+ 668   1          uint8_t need_sector = (RE_4KB(len) + (DEV_FLASH_SECTOR_SIZE - 1U)) >> 12U; // 不足4KB的做补足处
+             -理
+ 669   1          uint8_t need_page = ((RE_256B(len) + (DEV_FLASH_PAGE_SIZE - 1U)) >> 8U);   // 不足256B的做补足�
+             -�理
+ 670   1      
+ 671   1      #if (W25Qx_USING_DEBUG)
+                  Uartx_Printf(W25Qx_UART, "start\tsize\r\n%#X\t%#X\r\n", (uint16_t)start_addr, (uint16_t)len);
+              #endif
+ 674   1      
+ 675   1          if ((start_addr > DEV_FLASH_FLASH_SIZE) || ((start_addr + len) > DEV_FLASH_FLASH_SIZE))
+ 676   1              return;
+ 677   1      
+ 678   1          // if (RE_32KB(start_addr) && RE_4KB(start_addr) && RE_256B(start_addr)) // 存在越扇区擦除
+ 679   1          // {
+ 680   1          // }
+ 681   1      
+ 682   1          // #if (W25Qx_USING_DEBUG)
+ 683   1          Uartx_Printf(W25Qx_UART, "64KB\t32KB\t4KB\t256B\r\n%bd\t%bd\t%bd\t%bd\r\n",
+ 684   1                       need_64kb_block, need_32kb_block, need_sector, need_page);
+ 685   1          // #endif
+ 686   1      
+ 687   1          for (; need_64kb_block--; start_addr += DEV_FLASH_64KB_BLOCK_SIZE)
+ 688   1              dev_flash_erase_block(start_addr, FLASH_ERASE_64KB_BLOCK_CMD);
+ 689   1          Uartx_Printf(W25Qx_UART, "next addr: %#X\r\n", (uint16_t)start_addr);
+ 690   1      
+ 691   1          for (; need_32kb_block--; start_addr += DEV_FLASH_32KB_BLOCK_SIZE)
+ 692   1              dev_flash_erase_block(start_addr, FLASH_ERASE_32KB_BLOCK_CMD);
+ 693   1          Uartx_Printf(W25Qx_UART, "next addr: %#X\r\n", (uint16_t)start_addr);
+ 694   1      
+ 695   1          for (; need_sector--; start_addr += DEV_FLASH_SECTOR_SIZE)
+ 696   1              dev_flash_erase_sector(start_addr);
+ 697   1          Uartx_Printf(W25Qx_UART, "next addr: %#X\r\n", (uint16_t)start_addr);
+ 698   1      
+ 699   1          // for (; need_page--; start_addr += DEV_FLASH_PAGE_SIZE)
+ 700   1          //     dev_flash_erase_page(start_addr);
+ 701   1          // Uartx_Printf(W25Qx_UART, "next addr: %#X\r\n", (uint16_t)start_addr);
+ 702   1      }
+ 703          
+ 704          /******************************************************************************/
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1561    ----
+   CONSTANT SIZE    =     75    ----
+   XDATA SIZE       =   ----      88
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----       1
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

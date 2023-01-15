@@ -21,21 +21,11 @@ Target DLL:      STCMON51.DLL V0, 1, 0, 17
 Dialog DLL:      TP51.DLL V2.60.0.0
  
 <h2>Project:</h2>
-g:\STC_Workers\Nondestructive discharge instrument\Discharge Meter.uvproj
-Project File Date:  01/05/2023
+G:\STC_Workers\Nondestructive discharge instrument\Discharge Meter.uvproj
+Project File Date:  01/11/2023
 
 <h2>Output:</h2>
-Rebuild target 'Target 1'
-assembling STARTUP.A51...
-compiling dwin.c...
-compiling gpio.c...
-compiling main.c...
-compiling timer.c...
-compiling usart.c...
-compiling eeprom.c...
-compiling discharger.c...
-compiling Modbus.c...
-compiling utils_ringbuffer.c...
+Build target 'Target 1'
 linking...
 *** WARNING L57: UNCALLED FUNCTION, IGNORED FOR OVERLAY PROCESS
     NAME:    _DWIN_READ/DWIN
@@ -45,20 +35,34 @@ linking...
     NAME:    _RINGBUFFER_INIT/UTILS_RINGBUFFER
 *** WARNING L57: UNCALLED FUNCTION, IGNORED FOR OVERLAY PROCESS
     NAME:    _RINGBUFFER_PUT/UTILS_RINGBUFFER
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    NAME:    DEV_FLASH_WRITE_DISABLE/W25QX
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    NAME:    _DEV_FLASH_WRITE_SR/W25QX
 *** WARNING L57: UNCALLED FUNCTION, IGNORED FOR OVERLAY PROCESS
-    NAME:    _RINGBUFFER_FLUSH/UTILS_RINGBUFFER
+    NAME:    DEV_FLASH_READ_DEVICE_ID/W25QX
+*** WARNING L57: UNCALLED FUNCTION, IGNORED FOR OVERLAY PROCESS
+    NAME:    _DEV_FLASH_READ_BYTES/W25QX
+*** WARNING L57: UNCALLED FUNCTION, IGNORED FOR OVERLAY PROCESS
+    NAME:    DEV_FLASH_ERASE_CHIP/W25QX
+*** WARNING L57: UNCALLED FUNCTION, IGNORED FOR OVERLAY PROCESS
+    NAME:    _NVIC_SPI_INIT/SPI
 *** WARNING L25: DATA TYPES DIFFERENT
     SYMBOL:  Timer_Group
     MODULE:  .\Objects\timer.obj (TIMER)
    DEFINED:  .\Objects\main.obj (MAIN)
-Program Size: data=43.1 xdata=2325 const=755 code=22573
+*** WARNING L25: DATA TYPES DIFFERENT
+    SYMBOL:  soft_timer_group
+    MODULE:  .\Objects\ymodem.obj (YMODEM)
+   DEFINED:  .\Objects\timer.obj (TIMER)
+Program Size: data=43.1 xdata=5435 const=1349 code=29543
 creating hex file from ".\Objects\Discharge_Meter"...
 User command #1: "G:\STC_Workers\Nondestructive discharge instrument\hex2bin.bat"
-g:\STC_Workers\Nondestructive discharge instrument>cd Objects 
-g:\STC_Workers\Nondestructive discharge instrument\Objects>srec_cat.exe Discharge_Meter.hex -Intel -o Discharge.bin -Binary 
-g:\STC_Workers\Nondestructive discharge instrument\Objects>echo.
-".\Objects\Discharge_Meter" - 0 Error(s), 6 Warning(s).
-Build Time Elapsed:  00:00:03
+G:\STC_Workers\Nondestructive discharge instrument>cd Objects 
+G:\STC_Workers\Nondestructive discharge instrument\Objects>srec_cat.exe Discharge_Meter.hex -Intel -o Discharge.bin -Binary 
+G:\STC_Workers\Nondestructive discharge instrument\Objects>echo.
+".\Objects\Discharge_Meter" - 0 Error(s), 12 Warning(s).
+Build Time Elapsed:  00:00:01
 </pre>
 </body>
 </html>

@@ -15,20 +15,20 @@
 
 ## 更新说明
 
-| Date       | Author | Note          | Version number |
-| ---------- | ------ | ------------- | -------------- |
-| 2023.01.03 | LHC    |               | V1.0.1         |
-| 2022.09.01 | LHC    | First edition | V1.0.0         |
+|    Date    | Author |     Note      | Version number |
+| :--------: | :----: | :-----------: | :------------: |
+| 2023.01.03 |  LHC   |    update     |     V1.0.1     |
+| 2022.09.01 |  LHC   | First edition |     V1.0.0     |
 
 ## 简介
 
 - 无损放电仪主要由 数据交互芯片**STC8**、上云芯片 **WH-LTE-7S4-V2**、迪文屏幕 **DMG80480T043_01W**构成。 
 - WH-LTE-7S4-V2:
-- ![WH-LTE-7S4-V2](Document/WH-LTE-7S4-V2.jpg)
+- <img src="Document/WH-LTE-7S4-V2.jpg" alt="WH-LTE-7S4-V2" style="zoom: 150%;" />
 - DMG80480T043_01W:
   ![DMG80480T043_01W](Document/DMG80480T043_01W.jpg)
 - 特别说明：
-    
+  
     > 本机加入了独立看们狗功能，永不死机。
 
 ## 功能
@@ -52,9 +52,16 @@
 - 硬件部分：
   - PCB尺寸过大，且安装孔距与实际严重不符。
   - 通讯线路在大功率模式（Power>``100w``）时，干扰严重，必须接入**抗干扰磁环**。
-
 - 软件部分：
-  - 暂略。
+  - OTA升级步骤：
+    - 使用 STC-ISP软件刷入app程序。
+    - <img src="G:\STC_Workers\Nondestructive discharge instrument\Document\step1_刷入应用程序.gif"  />
+    - 在app程序中进行一次ota。
+    - <img src="G:\STC_Workers\Nondestructive discharge instrument\Document\step2_进行一次ota.gif" style="zoom:80%;" />
+    - 刷bootloader。
+    - ![](G:\STC_Workers\Nondestructive discharge instrument\Document\step3_输入bootloader.gif)
+
+
 
 
 ## 测试项目

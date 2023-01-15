@@ -9,6 +9,9 @@ compiling eeprom.c...
 compiling discharger.c...
 compiling Modbus.c...
 compiling utils_ringbuffer.c...
+compiling ymodem.c...
+compiling w25qx.c...
+compiling spi.c...
 linking...
 *** WARNING L57: UNCALLED FUNCTION, IGNORED FOR OVERLAY PROCESS
     NAME:    _DWIN_READ/DWIN
@@ -22,15 +25,32 @@ linking...
 *** WARNING L57: UNCALLED FUNCTION, IGNORED FOR OVERLAY PROCESS
     NAME:    _RINGBUFFER_PUT/UTILS_RINGBUFFER
 
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    NAME:    DEV_FLASH_WRITE_DISABLE/W25QX
+
+*** WARNING L16: UNCALLED SEGMENT, IGNORED FOR OVERLAY PROCESS
+    NAME:    _DEV_FLASH_WRITE_SR/W25QX
+
 *** WARNING L57: UNCALLED FUNCTION, IGNORED FOR OVERLAY PROCESS
-    NAME:    _RINGBUFFER_FLUSH/UTILS_RINGBUFFER
+    NAME:    DEV_FLASH_READ_DEVICE_ID/W25QX
+
+*** WARNING L57: UNCALLED FUNCTION, IGNORED FOR OVERLAY PROCESS
+    NAME:    DEV_FLASH_ERASE_CHIP/W25QX
+
+*** WARNING L57: UNCALLED FUNCTION, IGNORED FOR OVERLAY PROCESS
+    NAME:    _NVIC_SPI_INIT/SPI
 
 *** WARNING L25: DATA TYPES DIFFERENT
     SYMBOL:  Timer_Group
     MODULE:  .\Objects\timer.obj (TIMER)
    DEFINED:  .\Objects\main.obj (MAIN)
 
-Program Size: data=43.1 xdata=2325 const=755 code=22573
+*** WARNING L25: DATA TYPES DIFFERENT
+    SYMBOL:  soft_timer_group
+    MODULE:  .\Objects\ymodem.obj (YMODEM)
+   DEFINED:  .\Objects\timer.obj (TIMER)
+
+Program Size: data=43.1 xdata=5419 const=1664 code=30194
 creating hex file from ".\Objects\Discharge_Meter"...
 User command #1: "G:\STC_Workers\Nondestructive discharge instrument\hex2bin.bat"
 
@@ -40,5 +60,5 @@ g:\STC_Workers\Nondestructive discharge instrument\Objects>srec_cat.exe Discharg
 
 g:\STC_Workers\Nondestructive discharge instrument\Objects>echo.
 
-".\Objects\Discharge_Meter" - 0 Error(s), 6 Warning(s).
+".\Objects\Discharge_Meter" - 0 Error(s), 11 Warning(s).
 Build Time Elapsed:  00:00:03

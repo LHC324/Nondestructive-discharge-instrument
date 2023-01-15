@@ -9,12 +9,14 @@
 #define INC_MODBUS_H_
 
 #include "config.h"
+#if (MODBUS_USING_RB)
+#include "utils_ringbuffer.h"
+#endif
 
 #define SLAVE_ADDRESS 0x02
 #define MOD_RX_BUF_SIZE 128U
 #define MOD_TX_BUF_SIZE 128U
 #define REG_POOL_SIZE 36U
-#define OTA_FLAG_VALUE 0x5A
 
 #define COIL_OFFSET (1)
 #define INPUT_COIL_OFFSET (10001)
@@ -113,6 +115,9 @@ typedef struct
 struct Modbus_HandleTypeDef
 {
 	uint8_t Slave_Id;
+#if (USIING_OTA)
+	uint8_t Ota_Flag;
+#endif
 	// void (*Mod_TI_Recive)(pModbusHandle, DMA_HandleTypeDef *);
 	void(code *Mod_Poll)(pModbusHandle);
 	void(code *Mod_Transmit)(pModbusHandle, enum Using_Crc);
@@ -139,9 +144,15 @@ struct Modbus_HandleTypeDef
 	} Master;
 	struct
 	{
+#if (MODBUS_USING_RB)
+		struct ringbuffer *rb;
+		uint8_t *pdat;
+#else
 		uint8_t *pRbuf;
 		// uint8_t RxSize;
 		uint8_t RxCount;
+		struct ringbuffer *rb; // 用于ota升级
+#endif
 		/*预留外部数据结构接口*/
 		void *pHandle;
 		// ModbusMap *pMap;

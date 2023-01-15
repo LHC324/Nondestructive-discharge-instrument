@@ -31,9 +31,6 @@
 
 #define IAP_OFFSET (64U * 1024U - EEPROM_SIZE()) // STC8A8K64S4A12-64k
 
-/*OTA升级标志*/
-#define OTA_FLAG_ADDR (DEFAULT_SYSTEM_ADDR + 0x200U)
-
 /**
  * @brief	配置STC8单片机EEPROM的等待时间
  * @details

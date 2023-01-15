@@ -46,6 +46,12 @@
 #define USING_CRC 1
 /*迪文屏幕使用环形缓冲区接收数据*/
 #define DWIN_USING_RB 1
+/*modbus协议站使用环形缓冲区接收数据*/
+#define MODBUS_USING_RB 0
+/*使用ota升级*/
+#define USIING_OTA 1
+/*OTA升级标志*/
+#define OTA_FLAG_VALUE 0x5AA5
 #define USING_RGB_LED 1
 /*定义WIFI模块相关引脚*/
 #define WIFI_RELOADPIN P34
@@ -70,7 +76,7 @@
 #if defined(USING_SIMULATE)
 #define FOSC 24000000UL // 11059200UL
 #else
-#define FOSC 20000000UL
+#define FOSC 25000000UL
 #endif
 /*1ms(时钟频率越高，所能产生的时间越小)*/
 #define TIMES 1U
@@ -120,6 +126,7 @@ typedef bit bool;
 #define DEFAULT_SYSTEM_ADDR 0xFC00
 #endif
 #define DEFAULT_SYSTEM_PARAMETER "\xFF\xFF\xFF\xFF\x02\x01\x00\x84\x50"
+#define OTA_FLAG_ADDR 0x10000U //(DEFAULT_SYSTEM_ADDR + 0x200U)
 
 /***********************************系统上电参数***********************************/
 
